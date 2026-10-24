@@ -1,0 +1,414 @@
+/*
+ * 实验台通道编辑器样式。
+ *
+ * 与 studio.module.css 同一套原则：颜色一律用叠在宿主背景上的半透明灰，
+ * 文字用 inherit，这样浅色主题和深色主题都不用重画一遍。
+ */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(128, 128, 128, 0.2);
+  font-size: 13px;
+  color: inherit;
+}
+
+/* 在弹层里不再是页面里的一个区块，去掉分隔线并占满高度。 */
+.dialog .root {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+  height: 100%;
+  min-height: 0;
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.headActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* 设置页里的一行入口：文字 + 概况 + 按钮，不再把整个编辑器铺在页面上。 */
+.teaserRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(128, 128, 128, 0.22);
+  background: rgba(128, 128, 128, 0.04);
+  font-size: 13px;
+  color: inherit;
+}
+
+.teaserText {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.teaserText strong {
+  font-weight: 600;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-shell-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.dialog {
+  width: min(1180px, 94vw);
+  height: min(86vh, 900px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 14px;
+  padding: 16px 18px;
+  background: var(--dsh-surface, #ffffff);
+  color: inherit;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+}
+
+.head > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dim {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  opacity: 0.62;
+}
+
+.body {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 180px;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.listItem {
+  width: 100%;
+  appearance: none;
+  border: 1px solid rgba(128, 128, 128, 0.22);
+  border-radius: 8px;
+  background: rgba(128, 128, 128, 0.06);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 7px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.listItem small {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.listItem[data-active] {
+  border-color: rgba(120, 140, 255, 0.75);
+  background: rgba(120, 140, 255, 0.14);
+}
+
+.listItem:hover {
+  border-color: rgba(128, 128, 128, 0.45);
+}
+
+.form {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.rowLabel {
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.rowHint {
+  grid-column: 2;
+  font-size: 11px;
+  opacity: 0.5;
+}
+
+.row input,
+.row select,
+.row textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 7px;
+  background: rgba(128, 128, 128, 0.08);
+  color: inherit;
+  font: inherit;
+  padding: 6px 8px;
+  resize: vertical;
+}
+
+.row input:focus,
+.row select:focus,
+.row textarea:focus {
+  outline: 2px solid rgba(120, 140, 255, 0.55);
+  outline-offset: -1px;
+}
+
+.models {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(128, 128, 128, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modelsHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.modelTabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.modelTab {
+  appearance: none;
+  border: 1px solid rgba(128, 128, 128, 0.25);
+  border-radius: 999px;
+  background: rgba(128, 128, 128, 0.06);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.modelTab[data-active] {
+  border-color: rgba(120, 140, 255, 0.8);
+  background: rgba(120, 140, 255, 0.16);
+}
+
+.modelBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(128, 128, 128, 0.18);
+  border-radius: 10px;
+  background: rgba(128, 128, 128, 0.04);
+}
+
+.params {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.paramCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px;
+  border: 1px solid rgba(128, 128, 128, 0.22);
+  border-radius: 9px;
+  background: rgba(128, 128, 128, 0.05);
+}
+
+.paramHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.paramHead select {
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 7px;
+  background: rgba(128, 128, 128, 0.08);
+  color: inherit;
+  font: inherit;
+  padding: 5px 7px;
+}
+
+.paramKey {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 7px;
+  background: rgba(128, 128, 128, 0.08);
+  color: inherit;
+  font: inherit;
+  padding: 5px 8px;
+}
+
+.paramGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 6px 10px;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.primary,
+.ghost,
+.danger {
+  appearance: none;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+  color: inherit;
+}
+
+.primary {
+  border: 1px solid rgba(120, 140, 255, 0.8);
+  background: rgba(120, 140, 255, 0.22);
+}
+
+.ghost {
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  background: rgba(128, 128, 128, 0.08);
+}
+
+.danger {
+  border: 1px solid rgba(230, 120, 120, 0.6);
+  background: rgba(230, 120, 120, 0.12);
+}
+
+.primary:disabled,
+.ghost:disabled,
+.danger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.message {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.message[data-kind='error'] {
+  color: #d98080;
+}
+
+.message ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+
+/*
+ * 单模型抽屉：比整通道编辑器窄，只有内容区滚动，长表单不会被对话框裁掉。
+ */
+.drawer {
+  width: min(760px, 94vw);
+  height: min(88vh, 900px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 14px;
+  padding: 16px 18px;
+  background: var(--dsh-surface, #ffffff);
+  color: inherit;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+}
+
+.drawer .root {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.drawer .body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* 「不发」tick beside a field-name box. */
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-size: 12px;
+  opacity: 0.85;
+  cursor: pointer;
+}
+
+.check input {
+  margin: 0;
+}
+
+/* Dry-run request, shown verbatim so a dropped field is visible. */
+.preview {
+  margin: 6px 0 0;
+  padding: 10px 12px;
+  max-height: 320px;
+  overflow: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(128, 128, 128, 0.28);
+  background: rgba(128, 128, 128, 0.08);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: inherit;
+}
+
+.preview[data-ok='false'] {
+  border-color: rgba(220, 80, 80, 0.5);
+  color: rgb(200, 60, 60);
+}

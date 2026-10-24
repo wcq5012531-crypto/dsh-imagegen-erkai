@@ -1,0 +1,143 @@
+{
+  "name": "dsh-imagegen-studio",
+  "description": "dsh-imagegen-studio — AI image + video studio plugin for the dsh web GUI. A fork of @q253595422/dsh-imagegen-video that keeps the whole image pipeline, the video pipeline and the infinite canvas, and adds (1) a user-defined protocol adapter layer so any gateway model can be wired up by pasting a cURL command, with per-model size / aspect / duration / extra-field mapping, request templating, response path extraction and dry-run preview; (2) one-click replicate (reference image or clip to prompt + parameters + render); (3) one-click duration continuation (tail-frame chaining to extend a clip past the provider cap, with optional crossfade).",
+  "version": "1.16.2",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./locale-tables": "./lib/locale-tables.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-store",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-tool"
+      ],
+      "platform": "web"
+    }
+  },
+  "dependencies": {
+    "lucide-react": "^1.41.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.4"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-api-remotes": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-attachment": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-client-connection": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-client-locale": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-client-store": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-client-ui-settings": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-commands": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-credentials": "0.1.7-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-llm": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-settings": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-system-prompt": "0.1.2-alpha.2",
+    "@deepseek-ai/dsh-tools": "0.1.2-alpha.2",
+    "@deepseek-ai/schemastery": "^3.18.4",
+    "@types/node": "^22.20.0",
+    "@types/react": "~18.3.1",
+    "@types/react-dom": "^18.3.5",
+    "jsdom": "25.0.1",
+    "lightningcss": "1.32.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsdown": "0.22.2",
+    "typescript": "~5.7.2"
+  },
+  "files": [
+    "lib",
+    "src/templates",
+    "cordis.patch.yml",
+    "docs/releases",
+    "docs/compose-contract.md",
+    "docs/parity-contract.md",
+    "docs/skill-config.md",
+    "README.md",
+    "CHANGELOG.md",
+    "NOTICE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "license": "Apache-2.0",
+  "author": "yg",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "image-generation",
+    "video-generation",
+    "text-to-image",
+    "text-to-video",
+    "image-to-video",
+    "infinite-canvas",
+    "ffmpeg",
+    "protocol-adapter",
+    "curl-import",
+    "video-continuation",
+    "one-click-replicate",
+    "comfyui-continuum"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wcq5012531-crypto/dsh-imagegen-erkai.git"
+  },
+  "homepage": "https://github.com/wcq5012531-crypto/dsh-imagegen-erkai#readme",
+  "bugs": {
+    "url": "https://github.com/wcq5012531-crypto/dsh-imagegen-erkai/issues"
+  },
+  "scripts": {
+    "prepare": "tsdown",
+    "build": "tsdown",
+    "watch": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
+    "fetch-templates": "node scripts/fetch-templates.mjs",
+    "ppt:preview": "tsdown --config scripts/ppt-preview.config.ts",
+    "test:ppt-browser": "node scripts/ppt-browser-test.mjs",
+    "upstream:check": "node scripts/upstream-sync.mjs --check",
+    "upstream:plan": "node scripts/upstream-sync.mjs",
+    "upstream:adopt": "node scripts/upstream-sync.mjs --adopt",
+    "test": "node scripts/verify-tracked.mjs && pnpm build && node scripts/verify-reproducible.mjs && node scripts/smoke.mjs && node scripts/smoke-storyboard.mjs && node scripts/smoke-video.mjs && node scripts/smoke-video-director.mjs && node scripts/smoke-code-render.mjs && node scripts/smoke-workflow.mjs && node scripts/smoke-timeline.mjs && node scripts/smoke-cast.mjs && node scripts/smoke-canvas-video.mjs && node scripts/smoke-video-picker.mjs && node scripts/smoke-compose.mjs && node scripts/verify-timeline-compose.mjs && node scripts/verify-b-defect.mjs && node scripts/verify-video-layout.mjs && node scripts/verify-frame-grab.mjs && node scripts/verify-stores.mjs && node scripts/verify-ui-contracts.mjs",
+    "test:tracked": "node scripts/verify-tracked.mjs",
+    "test:video": "node scripts/smoke-video.mjs",
+    "test:director": "node scripts/smoke-video-director.mjs",
+    "test:code-render": "node scripts/smoke-code-render.mjs",
+    "test:canvas-video": "node scripts/smoke-canvas-video.mjs",
+    "test:compose": "node scripts/smoke-compose.mjs",
+    "test:storyboard": "node scripts/smoke-storyboard.mjs",
+    "test:workflow": "node scripts/smoke-workflow.mjs",
+    "test:timeline": "node scripts/smoke-timeline.mjs",
+    "test:cast": "node scripts/smoke-cast.mjs",
+    "test:timeline-compose": "node scripts/verify-timeline-compose.mjs",
+    "test:picker": "node scripts/smoke-video-picker.mjs",
+    "test:defect-b": "node scripts/verify-b-defect.mjs",
+    "test:negative": "node scripts/verify-negative.mjs contracts && node scripts/verify-negative.mjs smoke && node scripts/verify-negative.mjs video && node scripts/verify-negative.mjs canvas-video && node scripts/verify-negative.mjs storyboard && node scripts/verify-negative.mjs workflow && node scripts/verify-negative.mjs timeline && node scripts/verify-negative.mjs cast && node scripts/verify-negative.mjs pack && node scripts/verify-negative.mjs tracked && node scripts/verify-negative.mjs reproducible",
+    "studio:rebrand": "node scripts/studio/rebrand.mjs"
+  }
+}

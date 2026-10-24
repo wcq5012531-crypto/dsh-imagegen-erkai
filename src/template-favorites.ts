@@ -1,0 +1,126 @@
+/**
+ * Favorites store for the prompt-template library.
+ *
+ * The user's starred templates persist host-side as full case snapshots under
+ * ~/.dsh/dsh-imagegen-studio/templates/favorites.json, keyed by
+ * `${sourceId}:${caseId}` — the snapshot means a favorite stays usable even
+ * after the upstream list drops or renumbers the case. Framework-free
+ * (node:fs only) so the route layer and tests can drive it directly.
+ */
+
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
+import { imageDataRoot } from './image-storage-path.ts'
+import { isTemplateSourceId, type TemplateCase, type TemplateFavorite } from './protocol.ts'
+
+/**
+ * Resolved lazily on every use: the host calls `setImageDataRoot()` while
+ * resolving the plugin, after this module is evaluated, so a module-level
+ * constant would keep pointing at the default `~/.dsh/dsh-imagegen-studio` even when
+ * the profile stores its data elsewhere.
+ */
+function favoritesPath(): string { return path.join(imageDataRoot(), 'templates', 'favorites.json') }
+
+/** Refuse to grow the file without bound; the user curates this list. */
+const MAX_FAVORITES = 1000
+
+/** In-memory memo of the persisted list, together with the file it was read
+ *  from. The data root can be repointed after this module loads (a
+ *  `localStoragePath` change), and a memo that outlived its root would serve
+ *  the OLD root's favorites while writing them back to the NEW one. Keying the
+ *  memo on the path makes a repointed root miss the memo and re-read. */
+let memo: { path: string; entries: TemplateFavorite[] } | undefined
+
+/** Build the stable key of one case within a source. */
+export function templateFavoriteKey(sourceId: string, caseId: string): string {
+  return `${sourceId}:${caseId}`
+}
+
+/** Validate + normalize one raw stored favorite; undefined when unusable. */
+function normalizeFavorite(raw: unknown): TemplateFavorite | undefined {
+  if (raw === null || typeof raw !== 'object') return undefined
+  const record = raw as Record<string, unknown>
+  if (typeof record.key !== 'string' || typeof record.savedAt !== 'string') return undefined
+  const sourceId = typeof record.sourceId === 'string' ? record.sourceId : ''
+  if (!isTemplateSourceId(sourceId)) return undefined
+  const rawId = record.case && (record.case as TemplateCase).id
+  const id = typeof rawId === 'number' && Number.isFinite(rawId)
+    ? String(rawId)
+    : typeof rawId === 'string'
+      ? rawId.trim()
+      : ''
+  if (record.key !== templateFavoriteKey(sourceId, id)) return undefined
+  const rawCase = record.case
+  if (rawCase === null || typeof rawCase !== 'object') return undefined
+  const item = rawCase as Record<string, unknown>
+  const title = typeof item.title === 'string' ? item.title : ''
+  const prompt = typeof item.prompt === 'string' ? item.prompt : ''
+  if (id === '' || title === '' || prompt === '') return undefined
+  // Keep only the wire fields so hand-edited files cannot smuggle extras.
+  const snapshot: TemplateCase = {
+    id,
+    title,
+    prompt,
+    category: typeof item.category === 'string' ? item.category : '',
+    categoryZh: typeof item.categoryZh === 'string' ? item.categoryZh : '',
+    styles: Array.isArray(item.styles) ? item.styles.map(String) : [],
+    scenes: Array.isArray(item.scenes) ? item.scenes.map(String) : [],
+    sourceLabel: typeof item.sourceLabel === 'string' ? item.sourceLabel : '',
+    sourceUrl: typeof item.sourceUrl === 'string' ? item.sourceUrl : '',
+    githubUrl: typeof item.githubUrl === 'string' ? item.githubUrl : '',
+    image: typeof item.image === 'string' ? item.image : '',
+    featured: item.featured === true,
+  }
+  return { key: record.key, sourceId, savedAt: record.savedAt, case: snapshot }
+}
+
+/** Read + parse the favorites file (memoized per data root). */
+export async function listTemplateFavorites(): Promise<TemplateFavorite[]> {
+  const file = favoritesPath()
+  if (memo !== undefined && memo.path === file) return memo.entries
+  let entries: TemplateFavorite[]
+  try {
+    const parsed: unknown = JSON.parse(await fs.readFile(file, 'utf8'))
+    entries = Array.isArray(parsed)
+      ? parsed.map(normalizeFavorite).filter((entry): entry is TemplateFavorite => entry !== undefined)
+      : []
+  } catch {
+    entries = []
+  }
+  memo = { path: file, entries }
+  return entries
+}
+
+/** Persist the list atomically and update the memo. */
+async function writeFavorites(entries: TemplateFavorite[]): Promise<void> {
+  const file = favoritesPath()
+  memo = { path: file, entries }
+  await fs.mkdir(path.dirname(file), { recursive: true })
+  const tmp = `${file}.tmp-${process.pid}`
+  await fs.writeFile(tmp, JSON.stringify(entries, null, 2), 'utf8')
+  await fs.rename(tmp, file)
+}
+
+/** Star one template. Re-starring refreshes the snapshot and is idempotent. */
+export async function addTemplateFavorite(sourceId: string, item: TemplateCase): Promise<TemplateFavorite[]> {
+  if (!isTemplateSourceId(sourceId)) throw new Error(`未知的模板库来源：${sourceId}`)
+  const key = templateFavoriteKey(sourceId, item.id)
+  const rest = (await listTemplateFavorites()).filter(entry => entry.key !== key)
+  const entry: TemplateFavorite = { key, sourceId, savedAt: new Date().toISOString(), case: item }
+  const next = [entry, ...rest].slice(0, MAX_FAVORITES)
+  await writeFavorites(next)
+  return next
+}
+
+/** Unstar one template by key; unknown keys are a no-op. */
+export async function removeTemplateFavorite(key: string): Promise<TemplateFavorite[]> {
+  const next = (await listTemplateFavorites()).filter(entry => entry.key !== key)
+  if (next.length === memo?.entries.length) return next
+  await writeFavorites(next)
+  return next
+}
+
+/** Drop the in-memory memo (tests). */
+export function clearTemplateFavoritesMemo(): void {
+  memo = undefined
+}

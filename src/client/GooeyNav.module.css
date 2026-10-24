@@ -1,0 +1,255 @@
+/* reactbits.dev "GooeyNav" port, theme-following. The gooey merge uses an SVG
+ * alpha-contrast filter (blur + feColorMatrix) instead of the CSS
+ * blur+contrast trick, so colored particles survive on any surface: the pill
+ * and ink follow the host theme via [data-theme]. */
+
+.container {
+  --gooey-time: 1500ms;
+  /* A flex child refuses to shrink below its content unless min-width is 0, so
+     `overflow-x: auto` in the narrow-width media query below never kicked in:
+     the nav kept its full width and slid under the chat toggle instead. */
+  min-width: 0;
+  flex: 1 1 auto;
+  /* The particle burst is the one decorative flourish in this plugin, so its
+     four hues stay an accent rather than the host's brand color -- but they are
+     derived from the brand token instead of four unrelated literals, so they
+     move with the theme. */
+  --gooey-color-1: var(--dsw-alias-brand-primary, #5227ff);
+  --gooey-color-2: color-mix(in srgb, var(--dsw-alias-brand-primary, #5227ff) 45%, #ff9ffc);
+  --gooey-color-3: color-mix(in srgb, var(--dsw-alias-brand-primary, #5227ff) 55%, #ffffff);
+  --gooey-color-4: color-mix(in srgb, var(--dsw-alias-brand-primary, #5227ff) 40%, #22d3ee);
+  position: relative;
+  max-width: 100%;
+  font-size: 13px;
+}
+
+/* The pill and its label are the two colors that carry meaning, so they come
+   from the theme rather than from a literal. The per-surface branches exist for
+   the case where the host tokens are NOT defined (a bare shell, or the jsdom
+   harness): `var()` then falls back to the literal that is readable against
+   that surface. With the tokens present both branches resolve to the same theme
+   values, which are already inverses of each other, so the pill reads as a
+   solid chip under either theme without a hardcoded palette.
+   `data-theme` is set from a LIVE surface reading (see the component), so it is
+   still correct after the host switches theme. */
+.container[data-theme='light'] {
+  --gooey-pill: var(--dsw-alias-label-primary, #17171c);
+  --gooey-pill-ink: var(--dsw-alias-bg-layer-1, #ffffff);
+  --gooey-ink: var(--dsw-alias-label-secondary, #5b5e6b);
+}
+
+.container[data-theme='dark'] {
+  --gooey-pill: var(--dsw-alias-label-primary, #ffffff);
+  --gooey-pill-ink: var(--dsw-alias-bg-layer-1, #17171c);
+  --gooey-ink: var(--dsw-alias-label-secondary, #ffffff);
+}
+
+.gooSvg {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.container nav {
+  display: flex;
+  position: relative;
+  transform: translate3d(0, 0, 0.01px);
+}
+
+.container nav ul {
+  display: flex;
+  gap: 6px;
+  list-style: none;
+  padding: 0 4px;
+  margin: 0;
+  position: relative;
+  z-index: 3;
+}
+
+.container nav li {
+  border-radius: 100vw;
+  position: relative;
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease,
+    box-shadow 0.3s ease;
+  color: var(--gooey-ink);
+}
+
+.container nav li button {
+  display: inline-block;
+  padding: 5px 13px;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.container nav li.active {
+  color: var(--gooey-pill-ink);
+}
+
+.container nav li::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  background: var(--gooey-pill);
+  opacity: 0;
+  transform: scale(0);
+  transition: all 0.3s ease;
+  z-index: -1;
+}
+
+.container nav li.active::after {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.effect {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  opacity: 1;
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+  z-index: 1;
+}
+
+.effectText {
+  color: var(--gooey-ink);
+  transition: color 0.3s ease;
+  font-size: 13px;
+}
+
+.effectText.active {
+  color: var(--gooey-pill-ink);
+}
+
+.effectFilter {
+  filter: url(#dsh-gooey-nav-goo);
+}
+
+.effectFilter::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--gooey-pill);
+  transform: scale(0);
+  opacity: 0;
+  z-index: -1;
+  border-radius: 100vw;
+}
+
+.effectFilter.active::after {
+  animation: gooeyPill 0.3s ease both;
+}
+
+@keyframes gooeyPill {
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.particle,
+.point {
+  display: block;
+  opacity: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 100%;
+  transform-origin: center;
+}
+
+.particle {
+  --time: 1500ms;
+  position: absolute;
+  top: calc(50% - 7px);
+  left: calc(50% - 7px);
+  animation: gooeyParticle calc(var(--time)) ease 1 -350ms;
+}
+
+.point {
+  background: var(--color);
+  opacity: 1;
+  animation: gooeyPoint calc(var(--time)) ease 1 -350ms;
+}
+
+@keyframes gooeyParticle {
+  0% {
+    transform: rotate(0deg) translate(calc(var(--start-x)), calc(var(--start-y)));
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
+  }
+
+  70% {
+    transform: rotate(calc(var(--rotate) * 0.5)) translate(calc(var(--end-x) * 1.2), calc(var(--end-y) * 1.2));
+    opacity: 1;
+    animation-timing-function: ease;
+  }
+
+  85% {
+    transform: rotate(calc(var(--rotate) * 0.66)) translate(calc(var(--end-x)), calc(var(--end-y)));
+    opacity: 1;
+  }
+
+  100% {
+    transform: rotate(calc(var(--rotate) * 1.2)) translate(calc(var(--end-x) * 0.5), calc(var(--end-y) * 0.5));
+    opacity: 1;
+  }
+}
+
+@keyframes gooeyPoint {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+    animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45);
+  }
+
+  25% {
+    transform: scale(calc(var(--scale) * 0.25));
+  }
+
+  38% {
+    opacity: 1;
+  }
+
+  65% {
+    transform: scale(var(--scale));
+    opacity: 1;
+    animation-timing-function: ease;
+  }
+
+  85% {
+    transform: scale(var(--scale));
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(0);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .particle,
+  .point {
+    animation: none;
+  }
+}
+
+/* On a phone the nav is wider than the screen. Scrolling it keeps every entry
+   reachable; `width: max-content` stops the labels from being squeezed instead. */
+@media (max-width: 760px) {
+  .container {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .container nav { width: max-content; }
+}

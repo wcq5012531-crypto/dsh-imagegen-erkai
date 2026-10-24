@@ -1,0 +1,23 @@
+node_modules/
+# Anchored: an unanchored `lib/` also matches `scripts/lib/`, which silently
+# kept `scripts/lib/headless-chrome.mjs` out of the repository. Three guard
+# scripts import it, so every clean clone failed with ERR_MODULE_NOT_FOUND while
+# the working tree looked fine -- the file was on one disk only.
+/lib/
+*.tgz
+.build-lock/
+# Upstream port plans (diff + extracted source). Generated per run, never
+# shipped: the classification is read once and the tree that matters is this one.
+/.upstream/
+# 推广片逐帧渲染的中间产物（900 帧 × 两版，约 300MB）。成片与源文件在 docs/promo/。
+/docs/promo/src/frames/
+# `pnpm run ppt:preview` 的产物：单文件组件预览包，用于 pnpm run test:ppt-browser。
+/.ppt-preview/
+# macOS Finder 目录元数据：每次浏览目录都会重新生成，不属于仓库内容。
+.DS_Store
+
+# 上游源码快照（src.zip 等，85MB）：只在本地用于 upstream-sync 比对
+/_upstream/
+# 临时调试脚本（probe*.mjs / _studio-smoke.mts）：不属于插件源码
+/probe*.mjs
+/_studio-smoke.mts

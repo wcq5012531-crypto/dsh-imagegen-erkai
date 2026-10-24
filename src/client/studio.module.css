@@ -1,0 +1,948 @@
+/*
+ * Studio workspace styling.
+ *
+ * Colours are expressed as translucent greys over whatever the shell already
+ * painted, and text uses `inherit`. That is deliberate: the panel has to look
+ * native in the light theme and in the dark one, and a hard-coded palette is the
+ * one thing that breaks on a theme the author did not try.
+ */
+
+.root {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+  flex: 1 1 100%;
+  align-self: stretch;
+  overflow: hidden;
+  font-size: 13px;
+  color: inherit;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Channel line above the log: the rail that used to hold it is gone, and the
+   conversation list lives in the shell sidebar instead of a second column. */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px 0;
+  flex-wrap: wrap;
+}
+
+.toolbarSpacer {
+  flex: 1 1 auto;
+}
+
+.toolbarNote {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46ch;
+}
+
+.log {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 20px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hello {
+  margin: auto;
+  max-width: 100%;
+  padding: 24px 4px;
+  line-height: 1.7;
+}
+
+.hello h2 {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.hello p {
+  margin: 6px 0;
+}
+
+.warn {
+  color: #c2410c;
+}
+
+.dim {
+  opacity: 0.62;
+  font-size: 12px;
+}
+
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.turn[data-role='user'] {
+  align-items: flex-end;
+}
+
+.userBubble {
+  max-width: min(78%, 640px);
+  padding: 9px 13px;
+  border-radius: 14px 14px 4px 14px;
+  background: rgba(99, 91, 255, 0.12);
+  border: 1px solid rgba(99, 91, 255, 0.22);
+  word-break: break-word;
+}
+
+.userBubble p {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+.meta {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+  opacity: 0.66;
+}
+
+.resultBubble {
+  max-width: min(92%, 760px);
+  padding: 10px 13px;
+  border-radius: 14px 14px 14px 4px;
+  background: rgba(127, 127, 127, 0.08);
+  border: 1px solid rgba(127, 127, 127, 0.18);
+}
+
+.running {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+}
+
+.running progress {
+  flex: 1 1 auto;
+  height: 4px;
+}
+
+.spinner {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid rgba(99, 91, 255, 0.25);
+  border-top-color: #635bff;
+  animation: studio-spin 0.8s linear infinite;
+}
+
+@keyframes studio-spin {
+  to { transform: rotate(360deg); }
+}
+
+.error {
+  margin: 0;
+  color: #dc2626;
+  white-space: pre-wrap;
+}
+
+.imageGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.imageGrid img {
+  width: 100%;
+  border-radius: 9px;
+  display: block;
+  background: rgba(127, 127, 127, 0.12);
+}
+
+/* One rendered image plus its asset-library action. */
+.imageCell {
+  display: grid;
+  gap: 4px;
+}
+
+.imageCell > button {
+  justify-self: start;
+}
+
+.videoBox {
+  margin-top: 4px;
+}
+
+.videoBox video {
+  width: 100%;
+  max-height: 460px;
+  border-radius: 9px;
+  background: #000;
+  display: block;
+}
+
+.videoMeta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.8;
+  flex-wrap: wrap;
+}
+
+.warnings {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: #b45309;
+}
+
+.attachRow {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.attachThumb {
+  width: 54px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 7px;
+  border: 1px solid rgba(127, 127, 127, 0.3);
+}
+
+.attachChip {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  border-radius: 7px;
+  overflow: hidden;
+  border: 1px solid rgba(127, 127, 127, 0.3);
+}
+
+.attachChip img,
+.attachChip video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ＋素材 的来源菜单：和无限画布同一套五项，贴着按钮向上弹。 */
+.sourceMenu {
+  position: fixed;
+  z-index: var(--z-takeover);
+  transform: translateY(-100%);
+  display: flex;
+  flex-direction: column;
+  min-width: 132px;
+  padding: 4px;
+  border-radius: 9px;
+  border: 1px solid rgba(127, 127, 127, 0.28);
+  background: var(--dsh-surface, #fff);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+}
+
+.sourceMenu button {
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.sourceMenu button:hover {
+  background: rgba(127, 127, 127, 0.14);
+}
+
+.sourceBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+.sourceDialog {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(760px, 92vw);
+  max-height: 78vh;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(127, 127, 127, 0.26);
+  background: var(--dsh-surface, #fff);
+  color: inherit;
+}
+
+.sourceHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sourceHeader strong {
+  font-size: 13px;
+  flex: 1 1 auto;
+}
+
+.sourceGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+  overflow-y: auto;
+  min-height: 120px;
+}
+
+.sourceCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(127, 127, 127, 0.26);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.sourceCard[data-selected='true'] {
+  border-color: rgba(99, 91, 255, 0.62);
+  background: rgba(99, 91, 255, 0.12);
+}
+
+.sourceCard img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+}
+
+.sourceCard span {
+  font-size: 11px;
+  opacity: 0.72;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceFooter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sourceGenerate {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sourceGenerate textarea {
+  font: inherit;
+  font-size: 12px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  background: transparent;
+  color: inherit;
+  resize: vertical;
+}
+
+.sourceGenerateRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.attachChip button {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 16px;
+  height: 16px;
+  line-height: 14px;
+  border: none;
+  border-radius: 0 0 0 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0;
+}
+
+.composer {
+  flex: 0 0 auto;
+  border-top: 1px solid rgba(127, 127, 127, 0.2);
+  padding: 10px 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.input {
+  width: 100%;
+  resize: none;
+  border: 1px solid rgba(127, 127, 127, 0.28);
+  border-radius: 11px;
+  padding: 10px 12px;
+  font: inherit;
+  line-height: 1.55;
+  background: rgba(127, 127, 127, 0.06);
+  color: inherit;
+  outline: none;
+}
+
+.input:focus {
+  border-color: rgba(99, 91, 255, 0.55);
+  box-shadow: 0 0 0 3px rgba(99, 91, 255, 0.12);
+}
+
+/* 一行到底：chip 再多也不换行，横向滚动；「生成」固定右侧，不随滚动走。 */
+.chipBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* 换行而不是横向滚动：滚动容器的 overflow 会把下拉菜单裁掉，换行则不会。 */
+  flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: visible;
+}
+
+.chips > * {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.chip,
+.chipSelect,
+.ghost,
+.send,
+.newThread {
+  font: inherit;
+  font-size: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(127, 127, 127, 0.28);
+  background: rgba(127, 127, 127, 0.07);
+  color: inherit;
+  padding: 4px 9px;
+  cursor: pointer;
+  line-height: 1.5;
+}
+
+.chipSelect {
+  max-width: 190px;
+}
+
+/* 每个参数一颗「标签 + 下拉值」的胶囊；下拉是自己画的列表，不用原生 select。 */
+.pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(127, 127, 127, 0.28);
+  background: rgba(127, 127, 127, 0.07);
+  padding: 2px 6px 2px 8px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.pillKey {
+  color: rgba(127, 127, 127, 0.95);
+  user-select: none;
+}
+
+.pillValue {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 1px 0;
+  cursor: pointer;
+  max-width: 168px;
+}
+
+.pillText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 自绘小三角：系统主题改不动它，方向永远一致。 */
+.pillCaret {
+  width: 0;
+  height: 0;
+  border-left: 3.5px solid transparent;
+  border-right: 3.5px solid transparent;
+  border-top: 4px solid currentColor;
+  opacity: 0.55;
+  flex: 0 0 auto;
+}
+
+.pillValue[data-on='true'] .pillCaret {
+  opacity: 1;
+}
+
+/* 下拉列表：胶囊的子元素，默认贴下沿；空间不够时由组件切成向上（data-drop=up）。 */
+.pillMenu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: var(--z-pill-menu);
+  display: flex;
+  flex-direction: column;
+  min-width: 100%;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  background: rgba(250, 250, 252, 0.99);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.16);
+}
+
+.pillMenu[data-drop='up'] {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
+.pillItem {
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 8px;
+  min-height: 26px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pillItem:hover {
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.pillItem[data-on='true'] {
+  background: rgba(99, 91, 255, 0.16);
+  font-weight: 600;
+}
+
+.pill input {
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  outline: none;
+  cursor: text;
+  min-width: 5.5ch;
+  width: calc(var(--pill-chars, 6) * 1ch);
+  max-width: 168px;
+}
+
+.chip[data-on='true'] {
+  border-color: rgba(99, 91, 255, 0.5);
+  background: rgba(99, 91, 255, 0.14);
+}
+
+/* 点 chip 后就地展开的一排选项：和素材缩略图同一层位置，不浮层、不占常驻行。 */
+.pickRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: 9px;
+  border: 1px solid rgba(127, 127, 127, 0.2);
+  background: rgba(127, 127, 127, 0.05);
+}
+
+.pickLabel {
+  font-size: 12px;
+  opacity: 0.62;
+  margin-right: 2px;
+}
+
+.pickBtn {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 7px;
+  border: 1px solid rgba(127, 127, 127, 0.26);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.pickBtn[data-on='true'] {
+  border-color: rgba(99, 91, 255, 0.55);
+  background: rgba(99, 91, 255, 0.16);
+  font-weight: 600;
+}
+
+.pickClose {
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+/* 能力提示：这个模型接受哪些档位、参考资料上限、单价。 */
+.caps {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 11.5px;
+  opacity: 0.6;
+}
+
+.capsPrice {
+  margin-left: auto;
+}
+
+.ghost {
+  background: transparent;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.send {
+  background: #635bff;
+  border-color: #554de0;
+  color: #fff;
+  padding: 6px 18px;
+  font-weight: 600;
+}
+
+.send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.params {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed rgba(127, 127, 127, 0.32);
+  background: rgba(127, 127, 127, 0.05);
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* 参数弹层：不再每行一个 select 横铺，统一收进这里，按模型自动增删项。 */
+.paramsBox {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(127, 127, 127, 0.26);
+  background: rgba(127, 127, 127, 0.05);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.paramsHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.paramsHead strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.paramsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+
+.field > span {
+  opacity: 0.72;
+}
+
+.field input[type='text'],
+.field input[type='number'],
+.field select,
+.field textarea {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 7px;
+  border-radius: 7px;
+  border: 1px solid rgba(127, 127, 127, 0.28);
+  background: rgba(127, 127, 127, 0.06);
+  color: inherit;
+  outline: none;
+}
+
+.multi {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.multiItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.notice {
+  font-size: 12px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(99, 91, 255, 0.1);
+  border: 1px solid rgba(99, 91, 255, 0.25);
+}
+
+.notice[data-kind='error'] {
+  background: rgba(220, 38, 38, 0.1);
+  border-color: rgba(220, 38, 38, 0.3);
+  color: #b91c1c;
+}
+
+.notice ul {
+  margin: 5px 0 0;
+  padding-left: 18px;
+}
+
+.preview,
+.discover,
+.continuum {
+  border: 1px solid rgba(127, 127, 127, 0.28);
+  border-radius: 10px;
+  padding: 9px 11px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.previewHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.previewHead strong {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.preview pre {
+  margin: 0;
+  padding: 8px;
+  border-radius: 7px;
+  background: rgba(127, 127, 127, 0.12);
+  overflow-x: auto;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.continuum label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.continuum input[type='number'],
+.continuum select {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 7px;
+  border-radius: 7px;
+  border: 1px solid rgba(127, 127, 127, 0.28);
+  background: rgba(127, 127, 127, 0.06);
+  color: inherit;
+  width: 110px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+}
+
+.discoverList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.discoverItem {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: rgba(127, 127, 127, 0.08);
+  color: inherit;
+  cursor: pointer;
+}
+
+.discoverItem[data-known='true'] {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.rail {
+  flex: 0 0 208px;
+  border-left: 1px solid rgba(127, 127, 127, 0.2);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 10px 8px;
+  gap: 8px;
+}
+
+.railHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.newThread {
+  padding: 3px 8px;
+}
+
+.threadList {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.threadRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.threadRow[data-active='true'] {
+  background: rgba(99, 91, 255, 0.14);
+  border-color: rgba(99, 91, 255, 0.28);
+}
+
+.threadTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.threadCount {
+  opacity: 0.5;
+  font-size: 11px;
+}
+
+.railFoot {
+  border-top: 1px solid rgba(127, 127, 127, 0.18);
+  padding-top: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  word-break: break-all;
+}
+
+.empty {
+  margin: auto;
+  max-width: 460px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 24px;
+}
+
+.empty button {
+  align-self: center;
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(127, 127, 127, 0.3);
+  background: rgba(127, 127, 127, 0.1);
+  color: inherit;
+  cursor: pointer;
+}

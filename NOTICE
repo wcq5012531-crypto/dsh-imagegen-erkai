@@ -1,0 +1,16 @@
+dsh-imagegen-video
+Copyright 2026 q253595422
+
+This product includes code from dsh-imagegen:
+
+    dsh-imagegen
+    Copyright dickpy
+    https://github.com/dickpy/dsh-imagegen
+    Licensed under the Apache License, Version 2.0
+
+That attribution covers every part of this product that derives from that
+project, whichever release it came from. Changes made here are this project's
+own and are recorded in CHANGELOG.md.
+
+Third-party components bundled or referenced by this project are listed in
+THIRD_PARTY_NOTICES.md.
