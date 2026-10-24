@@ -21,3 +21,9 @@ node_modules/
 # 临时调试脚本（probe*.mjs / _studio-smoke.mts）：不属于插件源码
 /probe*.mjs
 /_studio-smoke.mts
+# 一次性补丁脚本与跑测日志：每次排查都会生成，属本地产物
+/_patch*.mjs
+/_runall*.mjs
+/_dig*.mjs
+/_sb_copy.mjs
+/*.log

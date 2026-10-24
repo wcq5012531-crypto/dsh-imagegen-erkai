@@ -430,17 +430,24 @@ await check('C1 the dock menu offers 添加视频 and the picker opens with thre
   const cardUrls = () => [...(pickerRoot()?.querySelectorAll('[data-video-card]') ?? [])]
     .map(card => card.getAttribute('data-clip-url'))
 
-  /** Close any open picker, then open a fresh one through the real dock menu. */
+  /**
+   * Close any open picker, then open a fresh one the way a user does: right-click
+   * the empty canvas, where the old bottom dock's rows now live
+   * (CanvasWorkspace.tsx, 「底部那条工具栏整体搬到这里」).
+   */
   const openPicker = async () => {
     if (pickerRoot() !== null) {
       clickElement(pickerRoot().querySelector('[data-video-picker-close]'))
       assert.ok(await waitUntil(() => pickerRoot() === null), 'the picker closes before it is reopened')
     }
-    const dockButton = view.querySelector('[data-dock-item][data-label="添加图片"] button')
-    assert.ok(dockButton !== null, 'the canvas dock offers its 添加图片 menu')
-    clickElement(dockButton)
-    assert.ok(await waitUntil(() => view.querySelector('[data-image-menu-video]') !== null), 'the image menu offers 添加视频')
-    clickElement(view.querySelector('[data-image-menu-video]'))
+    const surface = view.querySelector('[data-canvas-workspace] [class*="viewport"]')
+    assert.ok(surface !== null, 'the canvas viewport renders')
+    surface.dispatchEvent(new jsdomWindow.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 24, clientY: 24 }))
+    assert.ok(await waitUntil(() => jsdomDocument.querySelector('[role="menu"]') !== null), 'the canvas menu opens')
+    const videoRow = [...jsdomDocument.querySelectorAll('[role="menu"] button[role="menuitem"]')]
+      .find(button => (button.textContent ?? '').includes('添加视频'))
+    assert.ok(videoRow !== undefined, 'the canvas menu offers 添加视频')
+    clickElement(videoRow)
     assert.ok(await waitUntil(() => pickerRoot() !== null), 'the video picker opens')
     // A seam that quietly stopped matching would make every prop override below
     // a no-op and every gallery assertion meaningless, so it is asserted here.

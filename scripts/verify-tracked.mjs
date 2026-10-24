@@ -21,7 +21,7 @@
  */
 import { execFileSync } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -60,6 +60,13 @@ const SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(\s*)['"](\.[^'"]+)['"]/g
 
 const problems = []
 /**
+ * A path the way `git ls-files` spells it: forward slashes, whatever the
+ * platform. `path.relative` yields `src\\a.ts` on Windows, and comparing
+ * that with a tracked `src/a.ts` reports every import as missing -- a false
+ * FAIL that only shows up on a Windows checkout.
+ */
+const repoPath = absolute => relative(ROOT, absolute).split(sep).join('/')
+/**
  * Resolve a relative specifier the way the bundler does.
  *
  * TypeScript's ES-module style writes `./oauth.js` for the file `oauth.ts`
@@ -88,10 +95,10 @@ for (const file of files) {
     const rel = relative(ROOT, file)
     const options = candidates(file, specifier)
     // Any one candidate being tracked is enough: the import resolves.
-    if (options.some(option => tracked.has(relative(ROOT, option)))) continue
+    if (options.some(option => tracked.has(repoPath(option)))) continue
     // Not tracked. Name the one the author most likely meant, but only report
     // it when NOTHING in the candidate set is tracked.
-    problems.push(`${rel} imports ${specifier} -> ${relative(ROOT, options[0])}, which is not in the repository`)
+    problems.push(`${rel} imports ${specifier} -> ${repoPath(options[0])}, which is not in the repository`)
   }
 }
 

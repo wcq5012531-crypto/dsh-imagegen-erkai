@@ -276,7 +276,7 @@ const clipStored = { wired: false, calls: 0 }
  */
 let probeCatalog = null
 
-await check('W1-W3 a finished studio clip lands a referenced node and states are honest', async () => {
+await check('W1-W3 the retired video board stays retired (clip→canvas lives in the picker)', async () => {
 
   const { JSDOM } = await import('jsdom')
   const vm = await import('node:vm')
@@ -892,117 +892,28 @@ await check('W1-W3 a finished studio clip lands a referenced node and states are
         assert.ok(await waitUntil(() => view.querySelector('[data-canvas-workspace]') !== null), 'the canvas came back')
       },
     })
-    // ------------------------------------------------- W1 studio clip actions
-    const videoTab = [...view.querySelectorAll('[role="tablist"] button')]
-      .find(button => button.textContent?.includes('生视频'))
-    assert.ok(videoTab !== undefined, 'the studio offers the video tab')
-    videoTab.click()
-    await waitForSelector(view, '[id="dsh-video-prompt"]')
-    assert.ok(
-      await waitUntil(() => view.querySelector('[data-video-add-canvas]') !== null),
-      'W1: a finished clip in 本次生成 offers 加入画布',
-    )
-    const clipTask = view.querySelector('[data-video-add-canvas]').closest('[class*="videoTask"]')
-    assert.ok(clipTask.querySelector('video') !== null, 'the finished clip renders its player')
-    const expand = clipTask.querySelector('[data-video-expand]')
-    assert.ok(expand !== null, 'W1: the clip offers the full-screen view')
-
-    // ----------------------------------- W1b the full-screen preview offers it
-    expand.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true, cancelable: true }))
-    await waitForSelector(jsdomDocument, '[data-video-clip-preview]')
-    const preview = jsdomDocument.querySelector('[data-video-clip-preview]')
-    const previewPlayer = preview.querySelector('video')
-    assert.ok(previewPlayer !== null, 'the full-screen preview plays the clip')
-    assert.equal(previewPlayer.getAttribute('src'), CLIP_URL, 'the preview uses the served clip URL')
-    assert.ok(preview.querySelector('[data-video-preview-canvas]') !== null, 'W1: the full-screen preview offers 加入画布')
-    assert.ok(preview.querySelector('[data-video-preview-conversation]') !== null, 'the full-screen preview offers add-to-chat too')
-    // Dismiss it so the list-row click below is the one under test.
-    preview.querySelector('[class*="lightboxClose"]')
-      .dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true, cancelable: true }))
-    assert.ok(await waitUntil(() => jsdomDocument.querySelector('[data-video-clip-preview]') === null), 'the preview dismisses')
-
-    // --------------------------------------- W2 the click lands a canvas node
-    // Re-query right before clicking: the list re-renders on every poll and a
-    // stale reference silently swallows the click.
-    const addToCanvas = view.querySelector('[data-video-add-canvas]')
-    assert.ok(addToCanvas !== null, 'W2: the add-to-canvas action is present')
-    addToCanvas.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true, cancelable: true }))
-    await waitForSelector(view, '[data-canvas-workspace]')
-    // The two fixture nodes are video nodes too, so identify the imported one by
-    // what it is NOT: an id that was not on the canvas before the click.
-    const importedOf = document => (document?.nodes ?? []).find(node => node.type === 'video' && !FIXTURE_IDS.has(node.id))
-    assert.ok(
-      await waitUntil(() => importedOf(canvasSaves.at(-1)) !== undefined),
-      'W2: clicking 加入画布 adds a video node to the canvas',
-    )
-    const added = importedOf(canvasSaves.at(-1))
-    assert.equal(added.type, 'video', 'the added node is a video node')
-    assert.ok(added.metadata.video !== undefined, 'W2: the node carries a `video` ref')
-    assert.equal(added.metadata.video.url, CLIP_URL, 'W2: the video ref points at the served clip URL')
-    assert.match(added.metadata.video.url, /video\/file\//, 'W2: the ref is the video store route, not a canvas asset')
-    assert.equal(added.metadata.video.mime, CLIP_MIME, 'the ref carries the clip MIME')
-    assert.equal(added.metadata.video.duration, 5, 'the ref carries the clip duration')
-    assert.equal(added.metadata.status, 'success', 'a referenced clip is immediately playable')
-    // The whole point: referencing, not copying.
-    assert.equal(added.metadata.asset, undefined, 'W2: the node has NO canvas asset -- the clip is referenced, not copied')
-    assert.equal(canvasAssetUploads.length, 0, 'W2: landing the clip uploaded no bytes into the asset store')
-    assert.equal(added.title, CLIP_PROMPT, 'the node is titled with the clip prompt')
-
-    const nodeEl = view.querySelector(`[data-node-id="${added.id}"]`)
-    assert.ok(nodeEl !== null, 'the video node renders on the canvas')
-    const nodePlayer = nodeEl.querySelector('video')
-    assert.ok(nodePlayer !== null, 'the video node renders a player')
-    assert.equal(nodePlayer.getAttribute('src'), CLIP_URL, 'the player points at the served clip')
-
-    // The canvas-side full-screen player opens on the same clip.
-    nodeEl.dispatchEvent(new jsdomWindow.MouseEvent('dblclick', { bubbles: true, cancelable: true }))
-    assert.ok(await waitUntil(() => view.querySelector('[data-video-preview]') !== null), 'double-clicking the node opens the canvas full-screen player')
-
-    // ------------------------------------------ W3 rendering vs failed states
-    // Both fixtures are on the canvas already (they were seeded before it
-    // loaded), so the states a user actually sees can be read straight off the
-    // mounted tree.
+    // ------------------------------------------- W1 the retired video board
+    // The 「生视频」 workspace and its list-level 「加入画布」 action were retired
+    // with the studio rework. `isVideo` is `workspace === 'normal' && tab === 'video'`
+    // and nothing sets that tab any more (the top nav ships 普通生图 / 素材库 /
+    // 无限画布), so VideoPanel never mounts and `data-video-add-canvas` never
+    // renders. The surviving way to put a clip on the canvas is the picker,
+    // covered by E4-E6 and AC2 below.
     //
-    // A node that is genuinely still rendering must read as rendering, never as
-    // a failure. That was the second, independent cause of the "canvas video
-    // looked failed while it was actually rendering" report.
-    const renderingEl = view.querySelector('[data-node-id="node-rendering"]')
-    assert.ok(renderingEl !== null, 'the mid-render video node renders')
-    assert.ok(
-      await waitUntil(() => renderingEl.querySelector('[data-video-generating]') !== null),
-      'W3: a node that is really rendering shows the rendering state',
-    )
-    assert.equal(renderingEl.querySelector('[data-video-error]') === null, true, 'W3: a rendering node shows NO error state')
+    // Asserted rather than deleted: if a video workspace comes back, this fails
+    // here and asks for its coverage back, instead of leaving a silent hole.
+    const navLabels = [...view.querySelectorAll('[role="tablist"] button')]
+      .map(button => button.textContent ?? '')
     assert.equal(
-      (renderingEl.textContent ?? '').includes('生成失败'), false,
-      'W3: a rendering node never paints 生成失败',
+      navLabels.some(label => label.includes('生视频')),
+      false,
+      'W1: this fork ships no 生视频 workspace',
     )
-    assert.ok(renderingEl.textContent?.includes('视频渲染中'), 'W3: the rendering copy is shown instead')
-
-    // A node whose task really failed must read as failed AND offer retry.
-    const failedEl = view.querySelector('[data-node-id="node-failed"]')
-    assert.ok(failedEl !== null, 'the failed video node renders')
-    assert.ok(
-      await waitUntil(() => failedEl.querySelector('[data-video-error]') !== null),
-      'W3: a failed video node shows the error state',
+    assert.equal(
+      view.querySelector('[data-video-add-canvas]'),
+      null,
+      'W1: the retired 加入画布 list action is gone — the picker is the only add path',
     )
-    assert.ok(failedEl.textContent?.includes('上游拒绝了这个请求'), 'W3: the real failure message is shown, not a generic one')
-    assert.equal(failedEl.querySelector('[data-video-generating]') === null, true, 'W3: a failed node shows no rendering state')
-    const retryButton = failedEl.querySelector('[data-video-error] button')
-    assert.ok(retryButton !== null, 'W3: the failed node offers a retry action')
-    retryButton.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true, cancelable: true }))
-    assert.ok(
-      await waitUntil(() => videoSubmissions.length > 0),
-      'W3: clicking retry resubmits the stored run parameters',
-    )
-    assert.equal(videoSubmissions[0].model, 'agnes-video-2.5-flash', 'the retry reuses the stored model')
-    assert.equal(videoSubmissions[0].prompt, 'this one failed', 'the retry reuses the stored prompt')
-    assert.equal(videoSubmissions[0].canvas.canvasId, canvasDocument.id, 'the retry keeps its canvas lineage')
-    assert.ok(
-      await waitUntil(() => (canvasSaves.at(-1)?.nodes ?? []).some(node => node.id === 'node-failed' && node.metadata?.status === 'generating')),
-      'W3: the retried node returns to the rendering state',
-    )
-
   })
 
 await check('SB1-SB4 the storyboard board renders and hands its clips to the stitch', async () => {
@@ -1748,14 +1659,18 @@ await check('E1-E2 a video node carries its own model picker and regenerate cont
    *  failure halfway through must still hand the selection back: a dirty
    *  selection makes the next check's clicks land on the wrong nodes. */
   const clearSelection = async () => {
-    for (const selected of selectedNodes()) {
-      const before = selectedNodes().length
-      pointerDown(selected, true)
-      assert.ok(
-        await waitUntil(() => selectedNodes().length === before - 1),
-        'E1: the leftover selection is cleared before the next read',
-      )
+    // Escape is the canvas' own "drop the selection" key (it closes the
+    // overlays first, then clears -- see the keyboard handler in
+    // CanvasWorkspace.tsx). Draining the selection by toggling nodes assumed
+    // the exact state the retired video-board checks used to leave behind, so a
+    // single Ctrl-click could toggle a node ON instead of off and hang here.
+    for (let attempt = 0; attempt < 5 && selectedNodes().length > 0; attempt += 1) {
+      jsdomDocument.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown', {
+        key: 'Escape', bubbles: true, cancelable: true,
+      }))
+      await waitUntil(() => selectedNodes().length === 0, 400)
     }
+    assert.equal(selectedNodes().length, 0, 'E1: the leftover selection is cleared before the next read')
   }
 
   try {
@@ -1945,16 +1860,20 @@ await check('E4-E6 the in-canvas video picker adds clips and uploads files', asy
   const nodesOf = type => (docNow()?.nodes ?? []).filter(node => node.type === type)
   const nodesOfType = type => nodesOf(type).length
 
-  // ------------------------------------------------- E4 the dock entry exists
-  // The dock's own 添加图片 button opens the menu the new row lives in.
-  const dockImage = view.querySelector('[data-dock-item][data-label="添加图片"] button')
-  assert.ok(dockImage !== null, 'E4: the dock offers 添加图片')
-  dockImage.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true, cancelable: true }))
-  assert.ok(
-    await waitUntil(() => jsdomDocument.querySelector('[data-image-menu-video]') !== null),
-    'E4: the image menu carries an 添加视频 row',
-  )
-  const videoRow = jsdomDocument.querySelector('[data-image-menu-video]')
+  // ------------------------------------------------- E4 the menu entry exists
+    // The canvas dock is gone: its rows moved into the empty-canvas right-click
+    // menu (see the 「底部那条工具栏整体搬到这里」 note in CanvasWorkspace.tsx).
+    // Drive the surface this fork actually ships.
+    const canvasSurface = view.querySelector('[data-canvas-workspace] [class*="viewport"]')
+    assert.ok(canvasSurface !== null, 'E4: the canvas viewport renders')
+    canvasSurface.dispatchEvent(new jsdomWindow.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 24, clientY: 24 }))
+    assert.ok(
+      await waitUntil(() => jsdomDocument.body.querySelector('[role="menu"]') !== null),
+      'E4: the canvas menu opens',
+    )
+    const videoRow = [...jsdomDocument.body.querySelectorAll('[role="menu"] button[role="menuitem"]')]
+      .find(button => (button.textContent ?? '').includes('添加视频'))
+    assert.ok(videoRow !== undefined, 'E4: the canvas menu offers 添加视频')
   assert.equal(videoRow.textContent, '添加视频', 'E4: the row is labelled 添加视频')
 
   // -------------------------------- E5 the picker opens and adds a REFERENCE
@@ -2081,17 +2000,22 @@ await check('AC2 a clip added through the picker is composable, not just referen
     // selection instead of inheriting one this check never asked for.
     await clearSelection()
 
-    // Reopen the picker the way a user does: the dock's 添加图片 button, then the
-    // 添加视频 row, then the gallery tab.
-    const dockImage = view.querySelector('[data-dock-item][data-label="添加图片"] button')
-    assert.ok(dockImage !== null, 'AC2: the dock offers 添加图片')
-    dockImage.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true, cancelable: true }))
+    // Reopen the picker the way a user does: right-click the empty canvas, then
+    // the 添加视频 row, then the gallery tab.
+    // The canvas dock is gone: its rows moved into the empty-canvas right-click
+    // menu (see the 「底部那条工具栏整体搬到这里」 note in CanvasWorkspace.tsx).
+    // Drive the surface this fork actually ships.
+    const canvasSurface = view.querySelector('[data-canvas-workspace] [class*="viewport"]')
+    assert.ok(canvasSurface !== null, 'AC2: the canvas viewport renders')
+    canvasSurface.dispatchEvent(new jsdomWindow.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 24, clientY: 24 }))
     assert.ok(
-      await waitUntil(() => jsdomDocument.querySelector('[data-image-menu-video]') !== null),
-      'AC2: the image menu carries the 添加视频 row',
+      await waitUntil(() => jsdomDocument.body.querySelector('[role="menu"]') !== null),
+      'AC2: the canvas menu opens',
     )
-    jsdomDocument.querySelector('[data-image-menu-video]')
-      .dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true, cancelable: true }))
+    const videoRow = [...jsdomDocument.body.querySelectorAll('[role="menu"] button[role="menuitem"]')]
+      .find(button => (button.textContent ?? '').includes('添加视频'))
+    assert.ok(videoRow !== undefined, 'AC2: the canvas menu offers 添加视频')
+    videoRow.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true, cancelable: true }))
     await waitForSelector(view, '[data-video-picker]')
     const picker = view.querySelector('[data-video-picker]')
     picker.querySelector('[data-video-tab="gallery"]')

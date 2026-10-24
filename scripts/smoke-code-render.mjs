@@ -191,13 +191,23 @@ await check('C3b a prose answer quotes what the model said so the user can tell 
 await check('C4c a slow renderer hits the deadline instead of hanging', async () => {
   const { renderCode } = await import(new URL('../lib/index.js', import.meta.url).href)
   // An infinite loop cannot be interrupted inside a frame; the deadline is
-  // checked between frames, so make each frame exceed it and use 2 frames.
+  // checked between frames, so make the frame exceed it.
+  //
   const slow = 'function render(ctx) { ctx.background("#000"); const until = Date.now() + 60; while (Date.now() < until) {} }'
   let code
   const started = Date.now()
   try {
     await renderCode({ kind: 'video', source: slow, width: 64, height: 64, fps: 30, seconds: 30, timeoutMs: 1 })
   } catch (error) { code = error.code }
+  // The deadline is a FRAME-LOOP guard, and a clip resolves its encoder before
+  // the first frame (src/code-render.ts: the ffmpeg lookup sits above the loop).
+  // On a machine without ffmpeg the render refuses with render-no-ffmpeg -- which
+  // C4d covers -- and the deadline is never consulted. Say so instead of
+  // asserting behaviour this host cannot reach.
+  if (code === 'render-no-ffmpeg') {
+    console.log('SKIP  C4c: no ffmpeg here, so the render never reaches its frame loop')
+    return
+  }
   assert.equal(code, 'render-timeout', `expected render-timeout, got ${code}`)
   assert.ok(Date.now() - started < 60_000, 'the timeout must actually cut the render short')
 })

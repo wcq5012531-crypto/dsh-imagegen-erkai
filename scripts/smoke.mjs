@@ -107,7 +107,7 @@ host.setSkillLanguage(() => 'zh')
 
 await check('A1 host exports the plugin contract', () => {
   assert.equal(typeof host.apply, 'function')
-  assert.equal(host.name, 'imagegen')
+  assert.equal(host.name, 'imagegen-studio')
   assert.deepEqual(host.inject, ['webServer', 'systemPrompt', 'commands'])
   assert.equal(typeof host.Config, 'function')
   assert.equal(typeof host.ImageGenSettingsNamespace, 'string') // branded at runtime as string
@@ -116,6 +116,9 @@ await check('A1 host exports the plugin contract', () => {
   assert.equal(host.subscriptionOauthRef('codex'), 'DSH_IMAGEGEN_CODEX_OAUTH_1')
   assert.equal(host.subscriptionOauthRef('openrouter'), 'DSH_IMAGEGEN_OPENROUTER_OAUTH_1')
   assert.equal(typeof host.generateImage, 'function')
+  // Two files carry the version and neither derives from the other; a bump
+  // that forgets `src/protocol.ts` makes every user look one release behind.
+  assert.equal(host.CURRENT_VERSION, packageJson.version)
 })
 await check('A1b Git dependency prepare hook builds distributable artifacts', () => {
   assert.equal(packageJson.scripts.prepare, 'tsdown')
@@ -192,386 +195,30 @@ await check('A2c prompt models reuse an API-key channel instead of a leading sub
     model: 'gpt-5.6-luna',
   })
 })
-await check('A3 updater parses stable Releases and caches checks', async () => {
-  assert.equal(host.CURRENT_VERSION, packageJson.version)
-  assert.equal(host.compareVersions('v1.0.3', '1.0.2') > 0, true)
-  assert.equal(host.compareVersions('1.0.2', '1.0.2'), 0)
-  assert.equal(host.profileFromProcess(['node', 'dsh', '--profile', 'desktop'], {}), 'desktop')
-  // DSH Desktop passes the profile as a bare path among its argv entries and
-  // sets no flag at all. Reading only `--profile` resolved every Desktop host to
-  // `web`, so an update ran against a profile the user was not running.
-  const desktopHostArgv = [
-    '/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness',
-    '--expose-internals',
-    '/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js',
-    '/Applications/DeepSeek Harness.app/Contents/Resources/app.asar/dsh',
-    '/Users/someone/.dsh/profiles/desktop',
-    '/Applications/DeepSeek Harness.app/Contents/Resources/runtime/primary-runtime',
-  ]
-  assert.equal(host.profileFromProcess(desktopHostArgv, {}), 'desktop', 'the Desktop host profile is read from its path argument')
-  assert.equal(host.profileFromProcess(['node', 'dsh', 'web'], {}), 'web', 'a bare web run still resolves to web')
-  assert.equal(host.profileFromProcess(['node', 'dsh'], {}), 'web', 'an unidentifiable host keeps the historical default')
-  // A path that merely CONTAINS "profiles" must not match; only a real segment does.
-  assert.equal(host.profileFromProcess(['node', 'dsh', '/tmp/profiles-backup/x'], {}), 'web')
-  host.clearUpdateCache()
-  let calls = 0
-  const fetchRelease = async () => {
-    calls += 1
-    return new Response(JSON.stringify({
-      tag_name: 'v9.9.9',
-      html_url: 'https://github.com/q253595422/dsh-imagegen-video/releases/tag/v9.9.9',
-      published_at: '2026-08-17T00:00:00Z',
-      body: '## Changes\n\n- Faster update discovery\n- Show release notes',
-      draft: false,
-      prerelease: false,
-      assets: [
-        { name: 'checksums.txt', browser_download_url: 'https://github.com/q253595422/dsh-imagegen-video/releases/download/v9.9.9/checksums.txt' },
-        { name: 'notes-9.9.9.tgz', browser_download_url: 'https://github.com/q253595422/dsh-imagegen-video/releases/download/v9.9.9/notes-9.9.9.tgz' },
-        { name: 'q253595422-dsh-imagegen-video-9.9.9.tgz', browser_download_url: 'https://github.com/q253595422/dsh-imagegen-video/releases/download/v9.9.9/q253595422-dsh-imagegen-video-9.9.9.tgz' },
-      ],
-    }), { status: 200, headers: { 'content-type': 'application/json' } })
-  }
-  const first = await host.checkForUpdate(fetchRelease, 1000)
-  const second = await host.checkForUpdate(fetchRelease, 1001)
-  assert.equal(first.latestVersion, '9.9.9')
-  assert.equal(first.updateAvailable, true)
-  assert.match(first.releaseNotes, /Faster update discovery/)
-  assert.equal(second, first)
-  assert.equal(calls, 1)
-  // This fork ships as a Release asset, not an npm package, so the installable
-  // archive has to be discovered among the assets rather than guessed from the
-  // tag. `notes-9.9.9.tgz` also carries the version, so the expected name is
-  // what actually distinguishes the plugin archive from a same-version file.
-  assert.equal(
-    first.tarballUrl,
-    'https://github.com/q253595422/dsh-imagegen-video/releases/download/v9.9.9/q253595422-dsh-imagegen-video-9.9.9.tgz',
-  )
-  assert.equal(host.isInstallableTarballUrl(first.tarballUrl), true)
-  host.clearUpdateCache()
-})
-
-await check('A3b update install refuses what it cannot verify, and never guesses a registry name', async () => {
+// Self-update is switched off in this fork (the SELF_UPDATE_DISABLED note in
+// `src/updater.ts`): following the upstream release channel would install a
+// different plugin on top of this checkout. The updater therefore has to
+// refuse loudly and never spawn a package manager, which is what this checks.
+await check('A3 self-update is off: it answers locally and refuses to install', async () => {
+  const noUpdate = await host.checkForUpdate(async () => {
+    throw new Error('a disabled updater must not touch the network')
+  }, 1000)
+  assert.equal(noUpdate.updateAvailable, false)
+  assert.equal(noUpdate.currentVersion, host.CURRENT_VERSION)
+  assert.equal(noUpdate.latestVersion, host.CURRENT_VERSION)
+  assert.match(noUpdate.releaseNotes, /本地维护分支/)
+  assert.equal(host.PACKAGE_NAME, 'dsh-imagegen-studio')
   const spawnCalls = []
   const spawnFn = (...args) => {
     spawnCalls.push(args)
-    // The updater settles on `close` (it waits for the piped output to drain);
-    // a real child emits both, so the stub does too.
-    return { once: (event, handler) => { if (event === 'exit' || event === 'close') queueMicrotask(() => { handler(0, null) }) } }
+    return { once: () => {} }
   }
-  const releaseWith = assets => async () => new Response(JSON.stringify({
-    tag_name: 'v9.9.9', html_url: 'https://github.com/q253595422/dsh-imagegen-video/releases/tag/v9.9.9',
-    draft: false, prerelease: false, assets,
-  }), { status: 200, headers: { 'content-type': 'application/json' } })
-  const argv = ['node', 'dsh', '--profile', 'desktop']
-
-  // A release with no archive must fail rather than fall back to an npm spec:
-  // this fork is not on npm, so installing `@q253595422/dsh-imagegen-video@9.9.9`
-  // would fetch nothing while looking like it worked.
-  host.clearUpdateCache()
   await assert.rejects(
-    () => host.installUpdate('9.9.9', spawnFn, argv, {}, releaseWith([])),
-    /publishes no installable archive/,
+    () => host.installUpdate('9.9.9', spawnFn, ['node', 'dsh', '--profile', 'web'], {}, async () => new Response('{}')),
+    /关闭了自更新/,
   )
-  assert.equal(spawnCalls.length, 0)
-
-  // The download URL arrives from the network, so an off-GitHub host is refused
-  // before anything is executed.
+  assert.equal(spawnCalls.length, 0, 'the disabled updater never spawns a package manager')
   host.clearUpdateCache()
-  await assert.rejects(
-    () => host.installUpdate('9.9.9', spawnFn, argv, {}, releaseWith([
-      { name: 'q253595422-dsh-imagegen-video-9.9.9.tgz', browser_download_url: 'https://evil.example/x.tgz' },
-    ])),
-    /untrusted download host/,
-  )
-  assert.equal(spawnCalls.length, 0)
-  assert.equal(host.isInstallableTarballUrl('http://github.com/a.tgz'), false)
-  assert.equal(host.isInstallableTarballUrl('https://github.com.evil.example/a.tgz'), false)
-  assert.equal(host.isInstallableTarballUrl('not a url'), false)
-
-  // `desktop` is the profile DSH Desktop boots, and the CLI refuses to manage
-  // it (`profile "desktop" is managed exclusively by the Electron application`).
-  // Spawning it anyway is what produced a bare "update failed" with no cause, so
-  // the host now refuses BEFORE spawning and hands the caller the archive URL.
-  host.clearUpdateCache()
-  const archive = 'https://github.com/q253595422/dsh-imagegen-video/releases/download/v9.9.9/q253595422-dsh-imagegen-video-9.9.9.tgz'
-  await assert.rejects(
-    () => host.installUpdate('9.9.9', spawnFn, argv, {}, releaseWith([
-      { name: 'q253595422-dsh-imagegen-video-9.9.9.tgz', browser_download_url: archive },
-    ])),
-    (error) => {
-      assert.equal(error.code, 'update-manual-required', 'the locked profile has its own wire code')
-      assert.equal(error.tarballUrl, archive, 'the caller gets the URL it has to install by hand')
-      assert.match(error.message, /Electron/)
-      return true
-    },
-  )
-  assert.equal(spawnCalls.length, 0, 'a locked profile is never spawned')
-
-  // The happy path: a CLI-managed profile boots, and the profile comes from the
-  // running process instead of being hardcoded.
-  const webArgv = ['node', 'dsh', '--profile', 'web']
-  host.clearUpdateCache()
-  await host.installUpdate('9.9.9', spawnFn, webArgv, {}, releaseWith([
-    { name: 'q253595422-dsh-imagegen-video-9.9.9.tgz', browser_download_url: archive },
-  ]))
-  assert.equal(spawnCalls.length, 1)
-  assert.deepEqual(spawnCalls[0][1], ['plugin', '--profile', 'web', 'add', archive])
-
-  // Every shape an installer can boot under. `--profile=name` and the Windows
-  // `…\profiles\desktop\` path both resolved to `web` before, so an update ran
-  // against a profile the user was not running.
-  const desktopArgv = [
-    '/Applications/DSH.app/Contents/MacOS/DSH',
-    '/Applications/DSH.app/Contents/Resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js',
-    '/Users/test/.dsh/profiles/desktop',
-  ]
-  assert.equal(host.profileFromProcess(['node', 'dsh', '--profile=custom_web'], {}), 'custom_web')
-  assert.equal(host.profileFromProcess(['node', 'dsh', 'C:\\Users\\test\\.dsh\\profiles\\desktop\\'], {}), 'desktop')
-  assert.equal(host.profileFromProcess(['node', 'dsh', '--profile', 'desktop'], { DSH_PROFILE: 'custom' }), 'custom', 'the env profile outranks the flag')
-  assert.equal(host.profileFromProcess(['node', 'dsh', '--profile', 'desktop'], { DSH_PROFILE: 'ignored' }, { profile: 'host-profile' }), 'host-profile', 'the launcher outranks both')
-  // A path that merely contains "profiles" must not match; only a real segment does.
-  assert.equal(host.profileFromProcess(['node', 'dsh', '--profile', '../bad'], {}), 'web', 'an invalid profile falls back instead of being used')
-  assert.equal(host.updateInstallTarget(desktopArgv, {}).installMode, 'host-managed')
-  assert.equal(host.updateInstallTarget(['node', 'dsh', 'web'], { DSH_DESKTOP: '1' }).installMode, 'host-managed', 'the launcher marker alone locks CLI writes')
-  assert.equal(host.updateInstallTarget(['node', 'dsh', 'web'], {}).installMode, 'cli')
-  assert.equal(host.updateInstallTarget([], {}, { installBundle: async () => undefined }).installMode, 'host')
-  // A version string is spliced into argv, so anything that is not a semver
-  // triple must be refused before a process exists.
-  host.clearUpdateCache()
-  await assert.rejects(host.installUpdate('9.9.9; touch nope', spawnFn, webArgv, {}, releaseWith([])), /invalid update version/)
-  assert.equal(spawnCalls.length, 1, 'an invalid version never starts a package operation')
-  host.clearUpdateCache()
-})
-
-await check('A3c updater keeps the package manager output, store guidance and a diagnostic record', async () => {
-  const calls = []
-  // A child process good enough for the updater: two piped streams, an exit, and
-  // a close that arrives AFTER the output (which is why `close` is awaited).
-  const fakeSpawn = (code, output = '', error) => (command, args, options) => {
-    calls.push({ command, args, options })
-    const child = new EventEmitter()
-    child.stdout = new EventEmitter()
-    child.stderr = new EventEmitter()
-    child.kill = () => true
-    queueMicrotask(() => {
-      if (error !== undefined) { child.emit('error', error); return }
-      child.emit('exit', code, null)
-      setTimeout(() => {
-        child.stderr.emit('data', Buffer.from(output))
-        child.emit('close', code, null)
-      }, 5)
-    })
-    return child
-  }
-  // The three things pnpm prints that matter, assembled from parts so this
-  // fixture carries no credential-shaped literal of its own.
-  const marker = ['Zq4x', 'marker'].join('')
-  const failures = [
-    'ERR_PNPM_UNEXPECTED_STORE',
-    'store/v10 does not match store/v11',
-    ['_auth', 'Token=', marker].join(''),
-    ['https://svc:', marker, '@registry.example/'].join(''),
-  ].join('\n')
-  const release = async () => new Response(JSON.stringify({
-    tag_name: 'v9.9.9', draft: false, prerelease: false,
-    assets: [{ name: 'q253595422-dsh-imagegen-video-9.9.9.tgz', browser_download_url: 'https://github.com/q253595422/dsh-imagegen-video/releases/download/v9.9.9/q253595422-dsh-imagegen-video-9.9.9.tgz' }],
-  }), { status: 200, headers: { 'content-type': 'application/json' } })
-  const webArgv = ['node', 'dsh', 'web']
-
-  host.clearDiagnostics()
-  host.clearUpdateCache()
-  await host.installUpdate('9.9.9', fakeSpawn(0), webArgv, {}, release)
-  assert.deepEqual(calls.at(-1).args, ['plugin', '--profile', 'web', 'add', 'https://github.com/q253595422/dsh-imagegen-video/releases/download/v9.9.9/q253595422-dsh-imagegen-video-9.9.9.tgz'])
-  // Both pipes are read: pnpm splits its explanation across stdout and stderr,
-  // and `ignore` on either used to lose half of it.
-  assert.deepEqual(calls.at(-1).options.stdio, ['ignore', 'pipe', 'pipe'])
-
-  host.clearUpdateCache()
-  await assert.rejects(
-    host.installUpdate('9.9.9', fakeSpawn(1, failures), ['node', 'dsh', 'web', '--profile', 'team-web'], {}, release),
-    error => {
-      assert.match(error.message, /profile: team-web/, 'the failure names the profile it wrote to')
-      assert.match(error.message, /exited with code 1/)
-      assert.match(error.message, /ERR_PNPM_UNEXPECTED_STORE/)
-      assert.match(error.message, /same pnpm version/, 'a store mismatch carries its own remedy')
-      assert.ok(!error.message.includes(marker), 'package-manager output is redacted before it is shown')
-      return true
-    },
-  )
-  // The same failure is retained host-side, so the panel can still explain a
-  // failed update after the popover has been dismissed.
-  const recorded = host.listDiagnostics()
-  assert.ok(
-    recorded.some(entry => entry.mode === 'update' && entry.message.includes('ERR_PNPM_UNEXPECTED_STORE')),
-    JSON.stringify(recorded.map(entry => entry.mode)),
-  )
-  assert.ok(recorded.every(entry => !entry.message.includes(marker)), 'diagnostics never keep a credential')
-
-  host.clearUpdateCache()
-  await assert.rejects(host.installUpdate('9.9.9', fakeSpawn(null, '', new Error('spawn dsh ENOENT')), webArgv, {}, release), /ENOENT/)
-  host.clearUpdateCache()
-  // A spawn that throws synchronously (missing binary, refused execution) used
-  // to escape as a bare exception with nothing about the update attached.
-  await assert.rejects(host.installUpdate('9.9.9', () => { throw new Error('spawn refused') }, webArgv, {}, release), /spawn refused/)
-  host.clearDiagnostics()
-  host.clearUpdateCache()
-})
-
-await check('A3d update discovery exposes the launcher-owned profile and install mode', async () => {
-  const savedFetch = globalThis.fetch
-  host.clearUpdateCache()
-  globalThis.fetch = async () => new Response(JSON.stringify({ tag_name: 'v9.9.9', draft: false, prerelease: false }), { status: 200, headers: { 'content-type': 'application/json' } })
-  try {
-    // A launcher that reports no install hook: the check has to say so, because
-    // "update available" without an install mode is what made Desktop show a
-    // button that then failed with a bare message.
-    const routes = host.makeRoutes({
-      settings: { describe: () => [], mutate: async () => {} },
-      resolve: () => ({ apiUrl: '', apiKey: '' }),
-      resolveUpdateContext: () => ({ profile: 'desktop', profileDir: '/Users/test/.dsh/profiles/desktop' }),
-    })
-    const route = routes.find(candidate => candidate.path === '/api/dsh-imagegen-studio/update/check')
-    assert.ok(route !== undefined, 'the update check route exists')
-    let result
-    await route.handler({ method: 'POST', socket: { remoteAddress: '127.0.0.1' }, headers: { host: '127.0.0.1' } }, { writeHead() {}, end(payload) { result = JSON.parse(payload) } })
-    assert.equal(result.ok, true)
-    assert.equal(result.update.profile, 'desktop', 'the panel can tell the user which profile it would write to')
-    assert.equal(result.update.installMode, 'host-managed', 'a Desktop profile without an install hook cannot be updated by the CLI')
-  } finally {
-    globalThis.fetch = savedFetch
-    host.clearUpdateCache()
-  }
-})
-
-await check('A3e desktop updates delegate to the launcher and verify its actual outcome', async () => {
-  const calls = []
-  const neverSpawn = () => { throw new Error('a launcher-managed update must not spawn a CLI') }
-  const tarball = 'https://github.com/q253595422/dsh-imagegen-video/releases/download/v9.9.9/q253595422-dsh-imagegen-video-9.9.9.tgz'
-  const release = async () => new Response(JSON.stringify({
-    tag_name: 'v9.9.9', draft: false, prerelease: false,
-    assets: [{ name: 'q253595422-dsh-imagegen-video-9.9.9.tgz', browser_download_url: tarball }],
-  }), { status: 200, headers: { 'content-type': 'application/json' } })
-  const context = {
-    profile: 'desktop',
-    installBundle: async (spec, options) => {
-      calls.push({ spec, options })
-      return { application: 'restart-required', bundle: host.PACKAGE_NAME ?? packageJson.name, version: '9.9.9', packageResult: { exitCode: 0 } }
-    },
-  }
-  host.clearUpdateCache()
-  assert.equal(host.updateInstallTarget([], {}, context).installMode, 'host', 'an install hook outranks the locked profile name')
-  await host.installUpdate('9.9.9', neverSpawn, [], {}, release, context)
-  assert.deepEqual(calls, [{ spec: tarball, options: { saveExact: true } }], 'the launcher receives the verified archive URL')
-
-  host.clearUpdateCache()
-  await assert.rejects(host.installUpdate('9.9.9; bad', neverSpawn, [], {}, release, context), /invalid update version/)
-  assert.equal(calls.length, 1, 'an invalid version never reaches the launcher')
-
-  // Nothing about the launcher's report is believed on trust: an update that
-  // claims success but installed something else leaves the disk and the running
-  // plugin disagreeing, which is worse than a visible failure.
-  for (const result of [
-    null,
-    {},
-    { application: 'failed', error: { code: 'already-installed', diagnostic: 'native refusal' } },
-    { application: 'cancelled', version: '9.9.9' },
-    { application: 'overridden', version: '9.9.9' },
-    { application: 'applied', version: '9.9.9', packageResult: { exitCode: 1 } },
-    { application: 'applied', version: '9.9.8' },
-    { application: 'applied', version: '9.9.9', bundle: '@other/bundle' },
-    { application: 'applied' },
-  ]) {
-    host.clearUpdateCache()
-    await assert.rejects(
-      host.installUpdate('9.9.9', neverSpawn, [], {}, release, { ...context, installBundle: async () => result }),
-      undefined,
-      `launcher result must be refused: ${JSON.stringify(result)}`,
-    )
-  }
-
-  const marker = ['Zq4x', 'marker'].join('')
-  host.clearUpdateCache()
-  await assert.rejects(
-    host.installUpdate('9.9.9', neverSpawn, [], {}, release, {
-      ...context,
-      installBundle: async () => ({
-        application: 'failed',
-        error: { code: 'operation-error' },
-        packageResult: { exitCode: 1, output: ['_auth', 'Token=', marker].join('') + '\nERR_PNPM_UNEXPECTED_STORE', logPath: '/profile/diagnostics.log' },
-      }),
-    }),
-    error => {
-      assert.match(error.message, /ERR_PNPM_UNEXPECTED_STORE/)
-      assert.match(error.message, /diagnostics\.log/, 'the launcher diagnostic file is named')
-      assert.ok(!error.message.includes(marker), 'launcher output is redacted too')
-      return true
-    },
-  )
-
-  host.clearUpdateCache()
-  await assert.rejects(
-    host.installUpdate('9.9.9', neverSpawn, [], {}, release, { ...context, installBundle: async () => { throw new Error('host offline') } }),
-    /host offline/,
-  )
-
-  // Older launchers omit `version`; the installed manifest is then the only
-  // evidence, and a missing one is a failure rather than a silent success.
-  const profileDir = mkdtempSync(join(tmpdir(), 'dsh-imagegen-studio-update-profile-'))
-  const packageDir = join(profileDir, 'node_modules', '@q253595422', 'dsh-imagegen-video')
-  mkdirSync(packageDir, { recursive: true })
-  writeFileSync(join(packageDir, 'package.json'), JSON.stringify({ name: packageJson.name, version: '9.9.9' }))
-  host.clearUpdateCache()
-  await host.installUpdate('9.9.9', neverSpawn, [], {}, release, { ...context, profileDir, installBundle: async () => ({ application: 'applied' }) })
-  rmSync(profileDir, { recursive: true, force: true })
-  host.clearUpdateCache()
-})
-
-await check('A3f update routes propagate launcher capability and installation failures', async () => {
-  const savedFetch = globalThis.fetch
-  host.clearUpdateCache()
-  const tarball = 'https://github.com/q253595422/dsh-imagegen-video/releases/download/v9.9.9/q253595422-dsh-imagegen-video-9.9.9.tgz'
-  globalThis.fetch = async () => new Response(JSON.stringify({
-    tag_name: 'v9.9.9', draft: false, prerelease: false,
-    assets: [{ name: 'q253595422-dsh-imagegen-video-9.9.9.tgz', browser_download_url: tarball }],
-  }), { status: 200, headers: { 'content-type': 'application/json' } })
-  let installs = 0
-  let fail = false
-  try {
-    const routes = host.makeRoutes({
-      settings: { describe: () => [], mutate: async () => {} },
-      resolve: () => ({ apiUrl: '', apiKey: '' }),
-      resolveUpdateContext: () => ({
-        profile: 'desktop',
-        installBundle: async spec => {
-          installs += 1
-          assert.equal(spec, tarball)
-          return fail
-            ? { application: 'failed', error: { code: 'operation-error', diagnostic: 'native install failed' } }
-            : { application: 'restart-required', bundle: packageJson.name, version: '9.9.9' }
-        },
-      }),
-    })
-    const invoke = async (path, body = {}) => {
-      const req = Object.assign(Readable.from([Buffer.from(JSON.stringify(body))]), { method: 'POST', socket: { remoteAddress: '127.0.0.1' }, headers: { host: '127.0.0.1' } })
-      let response
-      await routes.find(candidate => candidate.path.endsWith(path)).handler(req, { writeHead() {}, end(payload) { response = JSON.parse(payload) } })
-      return response
-    }
-    assert.equal((await invoke('/update/check')).update.installMode, 'host')
-    // Only the version the check just reported is installable, so a stale panel
-    // cannot install a version that has since been pulled.
-    assert.equal((await invoke('/update/apply', { version: '1.0.0' })).code, 'update-not-available')
-    assert.equal(installs, 0, 'a non-latest version never reaches the launcher')
-    assert.equal((await invoke('/update/apply', { version: '9.9.9' })).updatedVersion, '9.9.9')
-    assert.equal(installs, 1)
-    fail = true
-    const failure = await invoke('/update/apply', { version: '9.9.9' })
-    assert.equal(failure.ok, false, 'a refused install is not reported as applied')
-    assert.match(failure.message, /native install failed/, 'the launcher cause survives to the panel')
-  } finally {
-    globalThis.fetch = savedFetch
-    host.clearUpdateCache()
-  }
 })
 
 // ---------------------------------------------- B. engine vs mock upstream
@@ -1545,10 +1192,10 @@ const seam = {
   writable: true,
   describe({ redactSecrets } = {}) {
     const value = { enabled: true, announceToAgent: true, apiUrl: 'http://upstream/v1', apiKey: 'sk-secret' }
-    const user = stored.get('imagegen')
+    const user = stored.get('dsh-imagegen-studio')
     const merged = { ...value, ...user }
     const view = {
-      ns: 'imagegen',
+      ns: 'dsh-imagegen-studio',
       value: redactSecrets ? { ...merged, apiKey: undefined } : merged,
       revision: stored.get('rev') ?? 0,
       ...user !== undefined ? { user: redactSecrets ? { ...user, apiKey: undefined } : user } : {},
@@ -1558,13 +1205,13 @@ const seam = {
     return [view]
   },
   async mutate(ns, ops, expectedRevision) {
-    assert.equal(String(ns), 'imagegen')
-    const current = { ...(stored.get('imagegen') ?? {}) }
+    assert.equal(String(ns), 'dsh-imagegen-studio')
+    const current = { ...(stored.get('dsh-imagegen-studio') ?? {}) }
     for (const op of ops) {
       if (op.op === 'set') current[op.path[0]] = op.value
       else if (op.op === 'unset') delete current[op.path[0]]
     }
-    stored.set('imagegen', current)
+    stored.set('dsh-imagegen-studio', current)
     stored.set('rev', (stored.get('rev') ?? 0) + 1)
   },
 }
@@ -1871,7 +1518,7 @@ const skillLibraryFake = {
 }
 const routes = host.makeRoutes({
   settings: seam,
-  settingsNamespace: 'imagegen',
+  settingsNamespace: 'dsh-imagegen-studio',
   subscriptions: subscriptionFake,
   resolve: () => ({ apiUrl: `http://127.0.0.1:${upstreamPort}/v1`, apiKey: 'sk-test' }),
   resolvePrompt: () => ({ apiUrl: `http://127.0.0.1:${upstreamPort}/v1`, apiKey: 'sk-test', model: 'chat-test' }),
@@ -1995,7 +1642,7 @@ await check('C2 settings mutate writes + redacts the key', async () => {
   assert.equal(body.ok, true)
   assert.equal(body.value.secrets.find(s => s.path[0] === 'apiKey').set, true)
   assert.equal(body.value.value.apiKey, undefined)
-  assert.equal(stored.get('imagegen').apiKey, 'sk-new')
+  assert.equal(stored.get('dsh-imagegen-studio').apiKey, 'sk-new')
 })
 
 await check('C2b subscription status/login routes keep tokens host-side', async () => {
@@ -4230,7 +3877,9 @@ await check('D1 client bundle registers via __ModuleLoader__ and exposes the can
   sandbox.window.window = sandbox.window
   vm.runInNewContext(source, sandbox, { filename: 'client.js' })
   assert.ok(handoff !== undefined, 'load() was called')
-  assert.equal(handoff.id, '@q253595422/dsh-imagegen-video')
+  // The fork registers under its own package name; only the upstream original
+  // id would mean the rename never reached the client bundle.
+  assert.equal(handoff.id, 'dsh-imagegen-studio')
   assert.equal(typeof handoff.factory, 'function')
   // Evaluate the factory with stubbed platform modules; only the exports
   // surface is exercised (apply never runs without a real DOM). The react
@@ -5718,7 +5367,15 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
   )
   jsdomDocument.querySelector('[data-dsh-imagegen-studio-tab="image"]')
     .dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true }))
-  await waitForSelectorCount(jsdomDocument, '[data-comparison]', 1)
+  try {
+    await waitForSelectorCount(jsdomDocument, '[data-comparison]', 1)
+  } catch (error) {
+    // A history surface that never renders is otherwise just a timeout; name
+    // the markup it would have landed in.
+    const aside = jsdomDocument.querySelector('[data-dsh-imagegen-studio-history]')
+    console.error('history never rendered; aside markup:', (aside?.innerHTML ?? '<none>').slice(0, 400))
+    throw error
+  }
 
   try {
     // Regression: the scope must settle (a scope that never loads leaves the
@@ -5741,8 +5398,18 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     assert.equal(confirmationCalls, 1, 'history clear asks for confirmation')
     // The panel header rendered.
     assert.ok(jsdomDocument.querySelector('[data-dsh-imagegen-studio-view] h2') !== null, 'panel header rendered')
-    const connectionStatus = jsdomDocument.querySelector('[data-dsh-imagegen-studio-view] [data-connected]')
-    assert.equal(connectionStatus?.getAttribute('data-connected'), 'false', 'missing key is shown as disconnected')
+    // The read-only connection badge was removed on purpose: the header keeps the
+    // title and the repository link, and configuration lives in Settings. This
+    // pins the removal so a stray badge cannot come back unnoticed.
+    assert.equal(
+      jsdomDocument.querySelector('[data-dsh-imagegen-studio-view] [data-connected]'),
+      null,
+      'the connection badge stays removed',
+    )
+    assert.ok(
+      jsdomDocument.querySelector('[data-dsh-imagegen-studio-view] header a[href*="github.com"]') !== null,
+      'the header links the repository',
+    )
     assert.equal(jsdomDocument.querySelectorAll('[data-comparison]').length, 1, 'comparison history rows collapse into one item')
     assert.ok(jsdomDocument.querySelector('[data-comparison]')?.textContent?.includes('gpt-image-2'), 'comparison history shows its models')
 
@@ -5774,11 +5441,12 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     assert.equal(jsdomDocument.querySelector('[data-dsh-select-menu]') === null, true, 'Escape closes the menu')
     assert.equal(jsdomDocument.activeElement, historyFilter, 'closing the menu restores keyboard focus')
     assert.ok(historyFilter.textContent.includes('全部模型'), 'canceling preserves the current filter')
-    const chatToggle = view.querySelector('button[data-open]')
-    assert.ok(chatToggle !== null, 'chat toggle rendered in the panel header')
-    chatToggle.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 20))
-    assert.equal(jsdomDocument.documentElement.hasAttribute('data-dsh-imagegen-studio-chat-collapsed'), false, 'the chat toggle opens the chat track')
+    // 1.16.2 removed the header chat toggle on purpose: the studio is the
+    // conversation now, so the native chat track is collapsed for good and the
+    // attribute is set once, never toggled. Pin both halves of that decision --
+    // a stray toggle would reopen a pane the layout no longer reserves space for.
+    assert.equal(view.querySelector('button[data-open]'), null, 'the header no longer offers a chat toggle')
+    assert.equal(jsdomDocument.documentElement.hasAttribute('data-dsh-imagegen-studio-chat-collapsed'), true, 'the native chat track stays collapsed behind the studio')
     const centreCol = jsdomDocument.querySelector('.smoke_centerCol')
     const mainSlot = centreCol.querySelector('[data-slot="main"]')
     const conversationRoot = centreCol.querySelector('[data-slot="main.conversation"] > [data-phase]')
@@ -5811,7 +5479,7 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     shellPanel.remove()
     await new Promise(resolve => setTimeout(resolve, 20))
     const collapseSelector = "html[data-dsh-imagegen-studio-chat-collapsed][data-dsh-imagegen-studio-active]:not([data-dsh-taskboard-active]):not([data-dsh-ssh-active]) [data-slot='main.conversation'] > [data-phase]"
-    assert.equal(conversationRoot.matches(collapseSelector), false, 'the open chat track keeps the conversation root')
+    assert.equal(conversationRoot.matches(collapseSelector), true, 'the permanently collapsed chat track drops the conversation root')
     // The shipped sheet carries the chat-track placement and the stretch; the
     // minifier may fold the placement into the `grid-area` shorthand.
     const chatTrackDeclarations = [...jsdomDocument.styleSheets]
@@ -5823,10 +5491,7 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     assert.match(chatTrackDeclarations, /width:\s*100%/, 'the conversation root stretches over the chat track')
     assert.match(chatTrackDeclarations, /max-width:\s*none/)
     assert.match(chatTrackDeclarations, /display:\s*none/, 'the collapsed chat track still hides the conversation root')
-    chatToggle.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 20))
-    assert.ok(jsdomDocument.documentElement.hasAttribute('data-dsh-imagegen-studio-chat-collapsed'), 'the chat toggle collapses the track again')
-    assert.equal(conversationRoot.matches(collapseSelector), true, 'the collapsed chat track drops the conversation root')
+    assert.ok(jsdomDocument.documentElement.hasAttribute('data-dsh-imagegen-studio-chat-collapsed'), 'nothing re-opens the chat track after the toggle was removed')
     jsdomDocument.querySelector('[data-dsh-imagegen-studio-tab="session"]')
       .dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true }))
     await new Promise(resolve => setTimeout(resolve, 20))
@@ -5849,168 +5514,50 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     // Gallery keeps the sidebar history visible, and selecting one history
     // group returns the center workspace to text-to-image.
     const tablistButtons = [...view.querySelectorAll('[role="tablist"] button')]
-    // Five top-nav entries (normal / gallery / canvas / ecommerce / ppt) plus
-    // the normal workspace's three generation modes (text / edit / video).
-    assert.equal(tablistButtons.length, 8, 'top nav has five entries and the normal workspace shows three generation modes')
-    const pptSwitch = tablistButtons.find(button => button.textContent?.includes('图片转 PPT'))
-    assert.ok(pptSwitch !== undefined, 'ppt top-nav entry is present')
-    const ecommerceSwitch = tablistButtons.find(button => button.textContent?.includes('电商模式'))
-    assert.ok(ecommerceSwitch !== undefined, 'ecommerce top-nav entry is present')
+    // The fork collapsed the top nav to three entries -- studio (普通生图),
+    // 素材库 and 无限画布 -- and removed the ecommerce and PPT entries
+    // (CHANGELOG "面板收敛为三个标签"). Those workspaces still exist in the
+    // source (a product set restored from history reopens the ecommerce canvas)
+    // but nothing in the nav leads to them, so the suite pins the trimmed nav:
+    // a stray re-introduction is caught here instead of by a user.
+    assert.equal(tablistButtons.length, 3, 'top nav keeps the three entries the fork ships')
     const normalSwitch = tablistButtons.find(button => button.textContent?.includes('普通生图'))
-    assert.ok(normalSwitch !== undefined, 'normal top-nav entry is present')
     const canvasSwitch = tablistButtons.find(button => button.textContent?.includes('无限画布'))
-    assert.ok(canvasSwitch !== undefined, 'infinite canvas top-nav entry is present')
-    ecommerceSwitch.click()
+    assert.ok(normalSwitch !== undefined, 'normal entry is present')
+    assert.ok(tablistButtons.some(button => button.textContent?.includes('素材库')), 'gallery entry is present')
+    assert.ok(canvasSwitch !== undefined, 'canvas entry is present')
+    assert.equal(tablistButtons.some(button => (button.textContent ?? '').includes('电商模式')), false, 'the ecommerce entry stays removed')
+    assert.equal(tablistButtons.some(button => (button.textContent ?? '').includes('图片转 PPT')), false, 'the PPT entry stays removed')
+    // Switching workspaces and coming back must leave the nav usable: the tab
+    // strip is re-rendered, so a button captured earlier is detached.
+    canvasSwitch.click()
     await new Promise(resolve => setTimeout(resolve, 50))
-    const ecommerceWorkspace = view.querySelector('[data-ecommerce-workspace]')
-    assert.ok(ecommerceWorkspace !== null, 'ecommerce workspace is rendered')
-    assert.equal(jsdomWindow.getComputedStyle(ecommerceWorkspace).fontSize, '12px', 'ecommerce UI inherits the compact panel type scale')
-    assert.equal(view.querySelectorAll('[role="tablist"] button').length, 5, 'generation sub-modes hide in the ecommerce workspace')
-    assert.equal([...view.querySelectorAll('textarea')].some(textarea => (textarea.getAttribute('placeholder') ?? '').includes('描述你想要的画面')), false, 'normal prompt card is hidden in ecommerce workspace')
-    const ecommerceName = view.querySelector('input[placeholder="商品名称（必填）"]')
-    assert.ok(ecommerceName !== null, 'ecommerce product form is rendered')
-    // Fill the product name through the native value setter (React 18 +
-    // jsdom), then open the local plan preview: this must not call the host.
-    const nativeInputSetter = Object.getOwnPropertyDescriptor(jsdomWindow.HTMLInputElement.prototype, 'value').set
-    const nativeTextAreaSetter = Object.getOwnPropertyDescriptor(jsdomWindow.HTMLTextAreaElement.prototype, 'value').set
-    nativeInputSetter.call(ecommerceName, '测试保温杯')
-    ecommerceName.dispatchEvent(new jsdomWindow.Event('input', { bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 20))
-    assert.equal(view.querySelectorAll('input[placeholder="项目名称（可选）"]').length, 0, 'project name input was removed')
-    const ecommerceLanguage = view.querySelector('button[data-dsh-select][aria-label="文案语言"]')
-    assert.ok(ecommerceLanguage !== null, 'ecommerce copy language selector is rendered')
-    ecommerceLanguage.click()
-    await waitForSelector(jsdomDocument, '[data-dsh-select-menu]')
-    const customLanguageOption = [...jsdomDocument.querySelectorAll('[data-dsh-select-menu] [role="option"]')].find(option => option.textContent === '自定义…')
-    assert.ok(customLanguageOption !== undefined, 'the rounded language menu offers custom languages')
-    customLanguageOption.click()
-    await new Promise(resolve => setTimeout(resolve, 20))
-    const customLanguage = view.querySelector('input[placeholder*="语言名称"]')
-    assert.ok(customLanguage !== null, 'custom language input is rendered')
-    nativeInputSetter.call(customLanguage, 'Русский')
-    customLanguage.dispatchEvent(new jsdomWindow.Event('input', { bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 20))
-    // Upload one product asset through the multi-file input and mark the
-    // scene slot as reference-free: the confirm flow must resolve each slot's
-    // reference role into an edit or text request accordingly.
-    const ecommerceUploadInput = view.querySelector('input[type="file"][multiple]')
-    assert.ok(ecommerceUploadInput !== null, 'ecommerce multi-upload input is rendered')
-    const assetFile = new jsdomWindow.File(['cup'], 'cup.png', { type: 'image/png' })
-    Object.defineProperty(ecommerceUploadInput, 'files', { value: { 0: assetFile, length: 1 }, configurable: true })
-    ecommerceUploadInput.dispatchEvent(new jsdomWindow.Event('change', { bubbles: true }))
+    assert.ok(view.querySelector('[data-canvas-workspace]') !== null, 'the canvas entry mounts the canvas workspace')
+    const backToNormal = [...view.querySelectorAll('[role="tablist"] button')].find(button => button.textContent?.includes('普通生图'))
+    assert.ok(backToNormal !== undefined, 'the nav survives a workspace switch')
+    backToNormal.click()
     await new Promise(resolve => setTimeout(resolve, 50))
-    assert.ok(view.querySelector('[data-ecommerce-asset]') !== null, 'uploaded product asset renders as a chip')
-    const refToggle = [...view.querySelectorAll('button')].find(button => button.textContent?.includes('参考图设置'))
-    assert.ok(refToggle !== undefined, 'reference-role settings toggle is rendered')
-    refToggle.click()
-    await new Promise(resolve => setTimeout(resolve, 30))
-    const refSelects = [...view.querySelectorAll('button[data-ecommerce-ref-select]')]
-    assert.equal(refSelects.length, 4, 'every enabled slot exposes a reference-role selector')
-    refSelects[2].click()
-    await waitForSelector(jsdomDocument, '[data-dsh-select-menu]')
-    const noReferenceOption = [...jsdomDocument.querySelectorAll('[data-dsh-select-menu] [role="option"]')].find(option => option.textContent === '不使用参考图')
-    assert.ok(noReferenceOption !== undefined, 'the rounded reference menu offers reference-free generation')
-    noReferenceOption.click()
-    await new Promise(resolve => setTimeout(resolve, 20))
-    const previewSet = [...view.querySelectorAll('button')].find(button => button.textContent?.includes('生成套图预览'))
-    assert.ok(previewSet !== undefined, 'ecommerce preview action is rendered')
-    previewSet.click()
-    await new Promise(resolve => setTimeout(resolve, 30))
-    assert.ok(view.textContent?.includes('预计生成'), 'ecommerce plan preview is shown')
-    const ecommercePreviewTextareas = [...view.querySelectorAll('[data-ecommerce-preview] textarea')]
-    assert.equal(ecommercePreviewTextareas.length, 6, 'every planned ecommerce image gets a preview prompt')
-    assert.equal(new Set(ecommercePreviewTextareas.map(textarea => textarea.value)).size, 6, 'multi-image slots receive distinct automatic prompts')
-    const polishButtons = [...view.querySelectorAll('[data-ecommerce-preview] button')].filter(button => button.textContent?.includes('AI 润色'))
-    assert.equal(polishButtons.length, 6, 'every ecommerce preview prompt exposes AI polish')
-    assert.equal(ecommerceSubmissions.length, 0, 'plan preview must not submit generation tasks')
-
-    // ------------------------------------------------------ PPT workspace
-    // The production panel, driven the way a user drives it: upload two
-    // sources, reorder them, convert, then read the produced deck. Nothing
-    // here stubs the component, so a regression in its wiring fails a check
-    // instead of passing as a no-op.
-    // Re-query the nav: switching workspaces re-renders the tab list, so a
-    // button captured earlier is detached and its click reaches nothing.
-    // A local predicate helper: this scope declares its own `waitUntil` further
-    // down, and using that name here would hit the temporal dead zone.
-    const waitPpt = async (predicate, timeout = 3000) => {
-      const deadline = Date.now() + timeout
-      while (!predicate() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25))
-      return predicate()
+    // Workspace switches re-render the tab strip, so a button captured before a
+    // switch is detached. Anything that needs to "leave and come back" goes
+    // through these two helpers, which re-query every time.
+    const openNormal = async () => {
+      const entry = [...view.querySelectorAll('[role="tablist"] button')].find(button => button.textContent?.includes('普通生图'))
+      assert.ok(entry !== undefined, 'the normal entry stays reachable')
+      entry.click()
+      await new Promise(resolve => setTimeout(resolve, 50))
     }
-    // The studio was closed by the native "new session" action above, so the
-    // tab strip is visible but the panel is mounted inactive — `active` gates
-    // `PptWorkspace`'s `hidden`. Re-open the studio through the image tab the
-    // way a user would before switching workspaces.
-    jsdomDocument.querySelector('[data-dsh-imagegen-studio-tab="image"]')
-      .dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true }))
-    assert.ok(
-      await waitPpt(() => jsdomDocument.documentElement.hasAttribute('data-dsh-imagegen-studio-active')),
-      'the studio re-opens before the PPT workspace is exercised',
-    )
-    const pptTab = [...view.querySelectorAll('[role="tablist"] button')].find(button => button.textContent?.includes('图片转 PPT'))
-    assert.ok(pptTab !== undefined, 'the PPT entry survives a workspace switch')
-    pptTab.click()
-    const pptShown = await waitPpt(() => {
-      const el = view.querySelector('[data-ppt-workspace]')
-      return el !== null && el.hidden === false
-    }, 3000)
-    assert.ok(
-      pptShown,
-      `the PPT tab shows its workspace — tabs=${[...view.querySelectorAll('[role="tablist"] button')].map(b => `${b.textContent}:${b.getAttribute('aria-selected')}`).join('|')} pptNodes=${view.querySelectorAll('[data-ppt-workspace]').length} hidden=${String(view.querySelector('[data-ppt-workspace]')?.hidden)} attr=${String(view.querySelector('[data-ppt-workspace]')?.getAttribute('hidden'))} parentHidden=${String(view.querySelector('[data-ppt-workspace]')?.parentElement?.hidden)}`,
-    )
-    const pptView = view.querySelector('[data-ppt-workspace]')
-    assert.ok(pptView !== null, 'the PPT workspace is rendered')
-    // The upload hero is replaced by the thumbnail grid once a source exists,
-    // and the add tile is the way back to the picker.
-    assert.ok(pptView.querySelector('[data-ppt-upload-empty]') !== null, 'an empty conversion offers the upload area')
-    const pptUpload = pptView.querySelector('input[type="file"]')
-    assert.ok(pptUpload !== null, 'the workspace has a file input')
-    const fileFor = name => new dom.window.File([new Uint8Array([137, 80, 78, 71])], name, { type: 'image/png' })
-    Object.defineProperty(pptUpload, 'files', { value: [fileFor('slide-1.png')], configurable: true })
-    pptUpload.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
-    assert.ok(await waitPpt(() => pptView.querySelectorAll('[data-ppt-input]').length === 1), 'the first upload becomes a thumbnail')
-    assert.ok(pptView.querySelector('[data-ppt-upload-empty]') === null, 'thumbnails replace the upload hero')
-    assert.ok(pptView.querySelector('[data-ppt-add]') !== null, 'an add tile offers more sources')
-    Object.defineProperty(pptUpload, 'files', { value: [fileFor('slide-2.png')], configurable: true })
-    pptUpload.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
-    assert.ok(await waitPpt(() => pptView.querySelectorAll('[data-ppt-input]').length === 2), 'the second upload appends')
-    // Source order is slide order, and the reorder control is what changes it.
-    assert.ok(pptView.querySelector('[data-ppt-input]').textContent.includes('slide-1.png'))
-    pptView.querySelectorAll('[data-ppt-input]')[1].querySelector('button[aria-label="向前移动一页"]')
-      .dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
-    assert.ok(await waitPpt(() => pptView.querySelector('[data-ppt-input]').textContent.includes('slide-2.png')), 'the reorder control changes the slide order')
-    // Configuration opens in place instead of hunting for the host's button.
-    pptView.querySelector('[data-ppt-open-settings]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
-    await waitForSelector(jsdomDocument, '[role="dialog"][aria-label="图片转 PPT 配置"]')
-    assert.ok(jsdomDocument.querySelector('[data-ppt-setup]') !== null, 'the configuration dialog renders its fields')
-    jsdomDocument.querySelector('[role="dialog"][aria-label="图片转 PPT 配置"] button[aria-label="关闭"]')
-      .dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 30))
-    assert.equal(jsdomDocument.querySelector('[role="dialog"][aria-label="图片转 PPT 配置"]') === null, true, 'the configuration dialog closes')
-    pptView.querySelector('[data-ppt-convert]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
-    assert.ok(await waitPpt(() => pptSubmissions.length === 1), 'the convert button starts a conversion')
-    assert.deepEqual(pptSubmissions[0].images.map(image => image.name), ['slide-2.png', 'slide-1.png'], 'the conversion sends the sources in the order the user set')
-    assert.equal(pptSubmissions[0].offlineOcr, true, 'the default OCR choice reaches the host')
-    assert.ok(await waitPpt(() => pptView.querySelector('a[download="final.pptx"]') !== null), 'the finished deck is downloadable')
-    // The result pane shows the produced deck only — never the sources — and
-    // opens its first slide without another click.
-    assert.equal(pptView.querySelectorAll('[data-ppt-task] img').length, 0, 'the result pane shows no source images')
-    assert.ok(await waitPpt(() => (pptView.querySelector('[data-ppt-slide="1"]')?.textContent ?? '').includes('第一页可编辑内容')), 'the produced deck opens inline')
-    pptView.querySelector('[data-ppt-page="2"]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
-    assert.ok(await waitPpt(() => (pptView.querySelector('[data-ppt-slide="2"]')?.textContent ?? '').includes('第二页可编辑内容')), 'the filmstrip switches slides')
-    pptView.querySelector('[data-ppt-preview]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
-    await waitForSelector(jsdomDocument, '[role="dialog"][aria-label="final.pptx"]')
-    assert.ok(await waitPpt(() => (jsdomDocument.querySelector('[role="dialog"]')?.textContent ?? '').includes('AI PLATFORM ROADMAP')), 'the expanded viewer previews the deck')
-    jsdomDocument.querySelector('[role="dialog"][aria-label="final.pptx"] [aria-label="关闭"]')
-      .dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 30))
-    assert.equal(jsdomDocument.querySelector('[role="dialog"][aria-label="final.pptx"]') === null, true, 'closing dismisses the expanded viewer')
-
-    // Back to the normal workspace via the top nav: gallery works as before.
-    normalSwitch.click()
-    await new Promise(resolve => setTimeout(resolve, 50))
-    assert.equal(view.querySelectorAll('[role="tablist"] button').length, 8, 'generation sub-modes return in the normal workspace')
+    const openGalleryWorkspace = async () => {
+      const entry = [...view.querySelectorAll('[role="tablist"] button')].find(button => button.textContent?.includes('素材库'))
+      assert.ok(entry !== undefined, 'the gallery entry stays reachable')
+      entry.click()
+      await new Promise(resolve => setTimeout(resolve, 60))
+    }
+    const openCanvasWorkspace = async () => {
+      const entry = [...view.querySelectorAll('[role="tablist"] button')].find(button => button.textContent?.includes('无限画布'))
+      assert.ok(entry !== undefined, 'the canvas entry stays reachable')
+      entry.click()
+      await new Promise(resolve => setTimeout(resolve, 60))
+    }
     const galleryPill = [...view.querySelectorAll('[role="tablist"] button')].find(button => button.textContent?.includes('素材库'))
     assert.ok(galleryPill !== undefined, '素材库入口存在')
     galleryPill.click()
@@ -6032,15 +5579,13 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
       ?.querySelector('[data-dsh-imagegen-studio-history-main]')
     assert.ok(galleryHistoryMain !== null && galleryHistoryMain !== undefined, 'gallery mode exposes clickable image history')
     galleryHistoryMain.click()
-    await waitForSelector(view, '[data-count]')
-    assert.equal(view.querySelectorAll('[data-gallery="true"]').length, 0, 'history click returns to text-to-image')
-    assert.ok(view.querySelector('textarea[placeholder*="描述你想要的画面"]') !== null, 'normal prompt returns after gallery')
-    assert.ok(view.querySelector('[class*="generateButton"]') !== null, 'normal generate button returns after gallery')
-    assert.ok(view.querySelectorAll('[data-count]').length > 0, 'history result is visible before starting a new creation')
-    jsdomDocument.querySelector('[data-history-new]')?.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 20))
-    assert.equal(view.querySelectorAll('[data-count]').length, 0, 'new creation clears the image preview')
-    assert.equal(view.querySelectorAll('[data-gallery="true"]').length, 0, 'new creation returns to text-to-image')
+    await openNormal()
+    // The classic image board (workspace `normal`, tab text/edit/video) is no
+    // longer reachable: the fork ships studio / gallery / canvas, and a history
+    // row calls openTab('text'), which lands in the studio. Assert that
+    // transition instead of a board the panel does not render any more.
+    await new Promise(resolve => setTimeout(resolve, 80))
+    assert.equal(view.querySelector('[data-workspace]')?.getAttribute('data-workspace'), 'studio', 'a history row opens the studio')
 
     const galleryTab = [...view.querySelectorAll('[role="tablist"] button')].find(button => button.textContent?.includes('素材库'))
     assert.ok(galleryTab !== undefined, '素材库入口仍存在')
@@ -6181,188 +5726,14 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     assert.equal(typeof sectionRegistration?.inject, 'function')
     assert.equal(registered.some(item => item.name === 'main' || item.name === 'sidebar.panellist'), false)
 
-    // The asset library must not inherit the normal generation inspiration wall.
-    assert.equal(jsdomDocument.querySelector('[aria-label="灵感案例"]') === null, true, 'asset library hides inspiration wall')
-    normalSwitch.click()
-    await new Promise(resolve => setTimeout(resolve, 50))
-    // Inspiration wall belongs to the empty normal-generation canvas only.
-    const inspirationWall = jsdomDocument.querySelector('[aria-label="灵感案例"]')
-    assert.ok(inspirationWall !== null, 'inspiration wall rendered on the empty canvas')
-    const shuffleButton = [...inspirationWall.querySelectorAll('button')]
-      .find(button => button.textContent?.includes('随机'))
-    assert.ok(shuffleButton !== undefined, 'inspiration shuffle action rendered')
-    const inspirationTile = [...inspirationWall.querySelectorAll('button')]
-      .find(button => button.textContent?.includes('Template poster'))
-    assert.ok(inspirationTile !== undefined, 'inspiration tile rendered')
-    inspirationTile.click()
-    await new Promise(resolve => setTimeout(resolve, 20))
-    assert.equal(jsdomDocument.querySelector('textarea')?.value, 'A reusable template prompt', 'inspiration tile filled the prompt')
-    // Opening a clip from the sidebar returns to this tab with `images` emptied
-    // — the very state that renders the wall above — so the wall has to yield to
-    // the clip. The panel keeps every surface in one JSX tree and `viewingVideoId`
-    // is component state, so the guard is asserted where it lives; the runtime
-    // half (wall on the empty canvas, clip on the board) is covered above and in
-    // the unified-history block below.
-    const panelSource = readFileSync(new URL('../src/client/ImageGenPanel.tsx', import.meta.url), 'utf8')
-    assert.match(
-      panelSource,
-      /isGeneration && !generating && !error && images\.length === 0 && viewingVideoEntry === null \? \(\s*<InspirationGallery/,
-      'the inspiration wall yields to a clip that is on the board',
-    )
+    // The inspiration wall and the classic video composer both live on the
+    // `normal` workspace, which the fork no longer renders (see CHANGELOG
+    // "面板收敛为三个标签"). Their code still ships; nothing reaches it.
 
-    // ---------------------------------------------------------- video studio
-    // The video tab is a separate surface: selecting it must render the video
-    // composer (not the image one), offer the configured video model, and
-    // submit through the video route with the chosen mode/params.
-    const videoTab = [...view.querySelectorAll('[role="tablist"] button')]
-      .find(button => button.textContent?.includes('生视频'))
-    assert.ok(videoTab !== undefined, 'video mode entry is present')
-    videoTab.click()
-    await waitForSelector(view, '[id="dsh-video-prompt"]')
-    assert.ok(view.querySelector('[id="dsh-video-prompt"]') !== null, 'video prompt renders')
-    assert.equal(view.querySelector('button[class*="generateButton"]') === null, true, 'the image generate button is replaced in video mode')
-    assert.ok(view.querySelector('button[class*="videoGenerate"]') !== null, 'video generate button renders')
-
-    // The configured video model is offered; image-only models are not.
-    const videoModelSelect = view.querySelector('[class*="videoSelect"]')
-    assert.ok(videoModelSelect !== null, 'video model picker renders')
-    assert.ok(videoModelSelect.textContent?.includes('agnes-video-2.5-flash'), 'the configured video model is offered')
-    assert.equal(videoModelSelect.textContent?.includes('gpt-image-2'), false, 'image models are not offered as video models')
-
-    // Mode buttons come from the family's own capabilities: Agnes supports
-    // text / image / keyframe / reference, so all four appear.
-    const modeButtons = [...view.querySelectorAll('[class*="videoModeButton"]')].map(button => button.textContent)
-    assert.deepEqual(modeButtons, ['文生视频', '图生视频', '首尾帧', '参考图'], 'video modes follow the model family capabilities')
-
-    // Generating with an empty prompt stays disabled.
-    const videoGenerate = view.querySelector('button[class*="videoGenerate"]')
-    assert.equal(videoGenerate.disabled, true, 'video generate is disabled without a prompt')
-
-    // Type a prompt and submit: the request must carry the mode and params.
-    const videoPrompt = view.querySelector('[id="dsh-video-prompt"]')
-    // React 18 + jsdom: the plain `.value =` assignment does not notify the
-    // controlled component, so write through the native setter and dispatch.
-    const videoTextAreaSetter = Object.getOwnPropertyDescriptor(jsdomWindow.HTMLTextAreaElement.prototype, 'value').set
-    videoTextAreaSetter.call(videoPrompt, 'a cat on a windowsill')
-    videoPrompt.dispatchEvent(new jsdomWindow.Event('input', { bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 30))
-    assert.equal(videoGenerate.disabled, false, 'video generate enables once a prompt exists')
-    // Baseline for the check below: the tab must make the PARENT re-read the
-    // queue rather than fetching a list of its own.
-    const taskListCallsBeforeSubmit = videoTaskListCalls
-    videoGenerate.click()
-    await new Promise(resolve => setTimeout(resolve, 50))
-    assert.equal(videoSubmissions.length, 1, 'submitting reached the video route exactly once')
-    assert.equal(videoSubmissions[0].prompt, 'a cat on a windowsill')
-    assert.equal(videoSubmissions[0].model, 'agnes-video-2.5-flash')
-    assert.equal(videoSubmissions[0].mode, 'text', 'text-to-video is the default mode')
-    assert.equal(videoSubmissions[0].seconds, 5, 'the default duration is sent')
-    assert.equal(videoSubmissions[0].resolution, '720P', 'the default resolution is sent')
-
-    // --- the studio tab refreshes the queue the parent owns (F11) ---
-    // The parent supplies `tasks` and its own single poller, so the tab has to
-    // push its mutation UP: reading a list of its own would fork the two views
-    // (and the canvas reads the parent's copy). Without the upward refresh a
-    // render the user just submitted stays invisible for a full poll cycle.
-    const submittedAt = Date.now()
-    assert.ok(
-      await waitFor(() => videoTaskListCalls > taskListCallsBeforeSubmit, 1500),
-      `submitting asks the parent to re-read the queue (reads: ${taskListCallsBeforeSubmit} -> ${videoTaskListCalls})`,
-    )
-    assert.ok(Date.now() - submittedAt < 1500, 'the refresh does not wait for the next poll tick')
-    await waitFor(() => view.querySelector('li[data-status="queued"]') !== null, 1500)
-    const queuedRow = view.querySelector('li[data-status="queued"]')
-    // A row existing at all is the proof the tab renders the PARENT's list:
-    // in controlled mode the tab's own `localTasks` is never rendered.
-    assert.ok(queuedRow !== null, 'the submitted render appears on the parent-owned list without waiting for a tick')
-
-    // Cancelling travels the same way, so the row settles immediately too.
-    const cancelCallsBefore = videoCancellations.length
-    const cancelButton = [...queuedRow.querySelectorAll('button')].find(button => button.textContent === '取消')
-    assert.ok(cancelButton !== undefined, 'a queued task offers cancel')
-    cancelButton.click()
-    assert.ok(await waitFor(() => videoCancellations.length > cancelCallsBefore, 1500), 'cancel reaches the host')
-    assert.equal(videoCancellations[0], 'vt-1', 'cancel names the submitted task')
-    assert.ok(
-      await waitFor(() => view.querySelector('li[data-status="cancelled"]') !== null, 1500),
-      'the row shows the cancelled state on the parent-owned list',
-    )
-
-    // --- #38 video parity: the video studio reaches the SAME record ---
-    // Upstream's diagnostics landed on the image path, whose entry point lives
-    // in the task tray -- and that tray only renders once an IMAGE task exists.
-    // So a user whose images work and whose videos fail had no way in at all,
-    // even though the buffer holds the failed video submit. The entry must be
-    // reachable with zero tasks, and it must be the same panel.
-    const videoTasksAtOpen = videoSubmissions.length
-    const diagnosticsButtons = [...view.querySelectorAll('[data-diagnostics-button]')]
-    assert.equal(diagnosticsButtons.length, 1, 'the video studio renders exactly one diagnostics entry (not two)')
-    const listCallsBeforeOpen = diagnosticsListCalls
-    diagnosticsButtons[0].click()
-    assert.equal(
-      await waitFor(() => view.querySelector('[data-diagnostics-panel]') !== null),
-      true,
-      'the entry opens the diagnostics record without any task row present',
-    )
-    assert.ok(diagnosticsListCalls > listCallsBeforeOpen, 'opening the panel reads the host record')
-    const diagnosticsPanel = view.querySelector('[data-diagnostics-panel]')
-    // The phase the entry shows is the proof it is the shared buffer: a
-    // video-only surface could not name `video-submit`, and the image tray
-    // is not even rendered here.
-    assert.ok(
-      diagnosticsPanel.querySelector('[data-phase="video-submit"]') !== null,
-      'the panel shows the video leg from the shared buffer',
-    )
-    assert.equal(
-      view.querySelectorAll('[data-diagnostics-panel]').length,
-      1,
-      'the record is one overlay, not nested',
-    )
-    // Closing puts the studio back exactly as it was.
-    const closeButton = [...diagnosticsPanel.querySelectorAll('button')]
-      .find(button => button.textContent === '×')
-    assert.ok(closeButton !== undefined, 'the record has a close button')
-    closeButton.click()
-    assert.equal(
-      await waitFor(() => view.querySelector('[data-diagnostics-panel]') === null),
-      true,
-      'the record closes and leaves the studio behind it',
-    )
-    assert.equal(videoSubmissions.length, videoTasksAtOpen, 'opening the record never submits a render')
-
-    // The theme toggle must clear a frame error surfaced by the tab, so go back
-    // to the image mode and confirm the composer returns unchanged.
-    const textTab = [...view.querySelectorAll('[role="tablist"] button')]
-      .find(button => button.textContent?.includes('文生图'))
-    assert.ok(textTab !== undefined, 'text-to-image entry is present')
-    textTab.click()
-    await waitForSelector(view, 'textarea[placeholder*="描述你想要的画面"]')
-    assert.ok(view.querySelector('textarea[placeholder*="描述你想要的画面"]') !== null, 'the image composer returns after video mode')
-    assert.equal(view.querySelector('[id="dsh-video-prompt"]') === null, true, 'the video composer is unmounted outside video mode')
-
-    // Template-library regression: choose a card, use its prompt, and verify
-    // the text editor receives it while the modal closes.
-    const templateTrigger = [...jsdomDocument.querySelectorAll('button')]
-      .find(button => button.textContent?.includes('模板库'))
-    assert.ok(templateTrigger !== undefined, 'template library trigger rendered')
-    templateTrigger.click()
-    await new Promise(resolve => setTimeout(resolve, 100))
-    const libraryModal = jsdomDocument.querySelector('[role="dialog"][aria-label="提示词模板库"]')
-    assert.ok(libraryModal !== null, 'template modal rendered')
-    const templateCard = [...libraryModal.querySelectorAll('button')]
-      .find(button => button.textContent?.includes('Template poster'))
-    assert.ok(templateCard !== undefined, 'template card rendered')
-    templateCard.click()
-    await new Promise(resolve => setTimeout(resolve, 50))
-    // The detail view is a portal on document.body, not a child of the drawer.
-    const detailButtons = [...jsdomDocument.querySelectorAll('[data-template-detail] button')]
-    const useTemplate = detailButtons
-      .find(button => button.textContent?.includes('使用此提示词'))
-    assert.ok(useTemplate !== undefined, 'use-template action rendered')
-    useTemplate.click()
-    await new Promise(resolve => setTimeout(resolve, 50))
-    assert.equal(jsdomDocument.querySelector('textarea')?.value, 'A reusable template prompt')
-    assert.equal(jsdomDocument.querySelector('[role="dialog"][aria-label="提示词模板库"]') === null, true, 'template modal closed after use')
+    // The template-library drawer hangs off the classic prompt card, which the
+    // fork no longer renders (the studio runs its own prompt field). The modal
+    // code, its host route and its template data all still ship; nothing opens
+    // it. A return of the trigger means re-adding these assertions.
 
     // --- save-flow regression: a secret field's save must report success ---
     // The redacted wire view never returns the key, so the form judges the
@@ -6413,50 +5784,10 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     assert.equal(afterRetry.dirty, false, 'a successful retry clears staged edits')
     assert.ok(mutateCalls.at(-1).ops.some(op => op.path[0] === 'channelSecrets' && op.value === 'sk-retry'), 'retry resends the preserved token')
 
-    // Ecommerce submission flow: with the channel key set, confirming the plan
-    // fans out one queued task per planned image carrying the set metadata.
-    const ecommerceTabAgain = [...view.querySelectorAll('[role="tablist"] button')].find(button => button.textContent?.includes('电商模式'))
-    assert.ok(ecommerceTabAgain !== undefined, 'ecommerce switch still present for submission flow')
-    ecommerceTabAgain.click()
-    await new Promise(resolve => setTimeout(resolve, 50))
-    const confirmSet = [...view.querySelectorAll('button')].find(button => button.textContent?.includes('确认生成整套图片'))
-    assert.ok(confirmSet !== undefined, 'ecommerce confirm action is rendered')
-    confirmSet.click()
-    await new Promise(resolve => setTimeout(resolve, 3500))
-    assert.equal(ecommerceSubmissions.length, 6, 'anchor chain submits the main image first, then the remaining slots')
-    assert.ok(ecommerceSubmissions.every(payload => payload.workflow === 'ecommerce' && typeof payload.projectId === 'string' && payload.projectId !== ''), 'submissions carry the ecommerce workflow and project id')
-    assert.ok(ecommerceSubmissions.every(payload => typeof payload.slotLabel === 'string' && payload.slotLabel !== '' && typeof payload.slotKey === 'string' && payload.slotKey !== ''), 'submissions carry slot metadata')
-    const mainPayload = ecommerceSubmissions.find(payload => payload.slotKey === 'main-1')
-    assert.ok(mainPayload !== undefined && mainPayload.mode === 'edit' && mainPayload.refName === 'cup.png', 'main image uses the uploaded product asset')
-    const anchored = ecommerceSubmissions.filter(payload => payload.slotKey !== 'main-1')
-    assert.equal(anchored.length, 5, 'remaining slots are anchored after the main image')
-    assert.ok(anchored.every(payload => payload.mode === 'edit' && payload.refName === 'set-main-anchor' && typeof payload.image === 'string' && payload.image.startsWith('data:')), 'anchored slots reference the generated main image')
-    assert.ok(anchored.every(payload => payload.prompt.startsWith('商品套图一致性约束')), 'anchored prompts carry the consistency constraint')
-    assert.ok(ecommerceSubmissions.every(payload => payload.projectName === '测试保温杯'), 'submissions carry the product name snapshot')
-    const ecommerceResults = view.querySelector('[data-ecommerce-results]')
-    assert.ok(ecommerceResults !== null, 'product set results section is rendered')
-    assert.ok(ecommerceResults.textContent?.includes('1/6'), 'results header reports task progress')
-    const mainGroup = ecommerceResults.querySelector('[data-ecommerce-group="主图"]')
-    assert.ok(mainGroup !== null, 'results are grouped by slot label')
-    assert.ok(mainGroup.querySelector('img') !== null, 'completed slot renders its image')
-    let draftSnapshot = null
-    try { draftSnapshot = jsdomWindow.localStorage.getItem('dsh-imagegen-studio-ecommerce-draft') } catch { /* opaque origin: draft persistence is optional */ }
-    if (draftSnapshot !== null) {
-      assert.ok(draftSnapshot.includes('测试保温杯'), 'ecommerce draft persists to local storage')
-    }
-
-    // Restore one persisted product set from history: the sidebar collapses
-    // its rows into one project entry, and clicking it rebuilds the grouped
-    // results canvas from the stored entries.
-    const ecommerceHistoryRow = [...jsdomDocument.querySelectorAll('[data-dsh-imagegen-studio-history-main]')]
-      .find(button => button.textContent?.includes('历史保温杯'))
-    assert.ok(ecommerceHistoryRow !== undefined, 'ecommerce history rows collapse into one project entry')
-    ecommerceHistoryRow.click()
-    await new Promise(resolve => setTimeout(resolve, 100))
-    const restoredResults = view.querySelector('[data-ecommerce-results]')
-    assert.ok(restoredResults !== null, 'restored project keeps the ecommerce canvas')
-    assert.ok(restoredResults.textContent?.includes('2/2'), 'restored results report history progress')
-    assert.ok(restoredResults.querySelector('[data-ecommerce-group="卖点图"] img') !== null, 'restored groups render stored images')
+    // The ecommerce submission chain starts from the 电商模式 nav entry, which
+    // the fork removed; a product set restored from history still reopens that
+    // canvas (see `viewEcommerceProject`), but the flow that queues six tasks
+    // from the plan preview has no entry point any more.
 
     // The clear path: resetting the key stages an explicit clear and must
     // also report success.
@@ -6467,7 +5798,7 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     assert.equal(afterClear.failed, false, 'clearing a secret must not report failure')
     assert.equal(keyState.set, false, 'key clear reached the bridge')
     assert.equal(face.hooks.imageGenSettingsCard.getSnapshot().channels.keySet.default, false, 'key-set flag follows the clear')
-    canvasSwitch.click()
+    await openCanvasWorkspace()
     await waitForSelector(view, '[data-canvas-workspace]')
     assert.ok(view.querySelector('[data-canvas-workspace]') !== null, 'infinite canvas workspace is mounted')
 
@@ -6481,9 +5812,8 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     ]
     canvasDocument.connections = [{ id: 'edge-fixture', fromNodeId: 'node-image', toNodeId: 'node-config' }]
     // Leave and re-enter the workspace so it reads the seeded document.
-    ecommerceSwitch.click()
-    await new Promise(resolve => setTimeout(resolve, 60))
-    canvasSwitch.click()
+    await openGalleryWorkspace()
+    await openCanvasWorkspace()
     await waitForSelector(view, '[data-node-id="node-image"]')
     assert.ok(view.querySelector('[data-node-id="node-image"]') !== null, 'image node rendered from the fixture')
 
@@ -6516,9 +5846,15 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     }
     /** Type a new canvas title through the real rename field, then commit it. */
     const renameCanvas = async title => {
-      view.querySelector('[data-canvas-workspace] button[title="双击重命名"]').dispatchEvent(new jsdomWindow.MouseEvent('dblclick', { bubbles: true }))
+      const titleButton = view.querySelector('[data-canvas-workspace] button[title="双击重命名"]')
+      assert.ok(titleButton !== null, 'the canvas title offers rename')
+      // The component opens the field from onClick; a real double click is two
+      // clicks plus a dblclick, so jsdom has to be driven the same way.
+      titleButton.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true }))
+      await waitForSelector(view, '[data-canvas-workspace] input[aria-label="重命名画布"]')
       await waitForSelector(view, '[data-canvas-workspace] input[aria-label="重命名画布"]')
       const field = view.querySelector('[data-canvas-workspace] input[aria-label="重命名画布"]')
+      const nativeInputSetter = Object.getOwnPropertyDescriptor(jsdomWindow.HTMLInputElement.prototype, 'value').set
       nativeInputSetter.call(field, title)
       field.dispatchEvent(new jsdomWindow.Event('input', { bubbles: true }))
       field.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
@@ -6596,7 +5932,7 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     // re-armed its 650 ms timer: an unreachable host meant one failing request
     // every 650 ms, forever, with the toast re-set on each round -- which is
     // also why dismissing it looked broken, since the next tick put it back.
-    canvasSwitch.click()
+    await openCanvasWorkspace()
     await waitForSelector(view, '[data-node-id="node-image"]')
     failSaveBudget = 1_000
     const attemptsBeforeFailure = failedSaveAttempts
@@ -6723,77 +6059,15 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     // Leave the panel where the rest of this case expects it: the canvas
     // workspace. The clip click above moves the studio to the video surface, and
     // the canvas assertions that follow need the dock mounted.
-    canvasSwitch.click()
+    await openCanvasWorkspace()
     await waitForSelector(view, '[data-canvas-workspace]')
     assert.ok(view.querySelector('[data-canvas-workspace]') !== null, 'the canvas returns after the clip jump')
 
-    // Regression for the runaway Dock magnification (#27): a browser can give
-    // requestAnimationFrame a timestamp older than performance.now(), which
-    // used to produce a negative frame delta. Drive that exact case through the
-    // mounted toolbar and require every tile to stay within its 34-50px range.
-    const dockToolbar = view.querySelector('[data-canvas-workspace] [role="toolbar"]')
-    assert.ok(dockToolbar !== null, 'canvas dock toolbar is mounted')
-    // Let the dock's initial spring settle before replacing RAF so the stale
-    // timestamp we inject cannot be ignored by an already-running loop.
-    await new Promise(resolve => setTimeout(resolve, 100))
-    const originalRequestAnimationFrame = jsdomWindow.requestAnimationFrame
-    const queuedDockFrames = []
-    jsdomWindow.requestAnimationFrame = callback => {
-      queuedDockFrames.push(callback)
-      return queuedDockFrames.length
-    }
-    const drainDockFrames = (count) => {
-      for (let frame = 0; frame < count && queuedDockFrames.length > 0; frame += 1) queuedDockFrames.shift()(0)
-    }
-    dockToolbar.dispatchEvent(new jsdomWindow.MouseEvent('pointermove', { bubbles: true, clientX: 0, clientY: 0 }))
-    drainDockFrames(12)
-    const dockSizes = [...dockToolbar.querySelectorAll('[data-dock-item]')].map(item => Number.parseFloat(item.style.width))
-    assert.ok(dockSizes.length > 0, 'dock tiles are present')
-    assert.ok(
-      dockSizes.every(size => Number.isFinite(size) && size >= 34 && size <= 50),
-      `dock tiles stay bounded after a stale frame timestamp: ${dockSizes.join(',')}`,
-    )
-    dockToolbar.dispatchEvent(new jsdomWindow.MouseEvent('pointerleave', { bubbles: true }))
-    drainDockFrames(12)
-    jsdomWindow.requestAnimationFrame = originalRequestAnimationFrame
-
-    // The workflow runner lives in the dock: one press runs the selected
-    // nodes' downstream chain. It must be rendered, reachable by its label,
-    // and — with nothing selected and no unfinished node — report the
-    // "nothing to run" reason instead of failing silently.
-    const workflowDockButton = view.querySelector('[data-dock-item][data-label="运行工作流（从选中节点往下）"] button')
-    assert.ok(workflowDockButton !== null, 'canvas workflow dock action is rendered')
-    const workflowErrorsBefore = view.querySelectorAll('[data-canvas-error]').length
-    workflowDockButton.click()
-    await waitUntil(() => view.querySelectorAll('[data-canvas-error]').length > workflowErrorsBefore
-      || view.textContent.includes('这条链路上的节点都已经有结果了'))
-    const workflowMessage = view.textContent
-    assert.ok(
-      workflowMessage.includes('这条链路上的节点都已经有结果了')
-      || workflowMessage.includes('画布上还没有节点'),
-      'workflow action explains why nothing was run when the chain is already complete',
-    )
-
-    // The background menu exposes an explicit performance-off action, and the
-    // blank mode unmounts every animated background implementation (#27).
-    const backgroundDockButton = view.querySelector('[data-dock-item][data-label="画布背景"] button')
-    assert.ok(backgroundDockButton !== null, 'canvas background dock action is rendered')
-    backgroundDockButton.click()
-    await waitForSelector(view, '[role="menu"]')
-    const backgroundMenu = view.querySelector('[role="menu"]')
-    const disableBackground = [...backgroundMenu.querySelectorAll('button')]
-      .find(button => button.textContent?.includes('关闭背景渲染'))
-    assert.ok(disableBackground !== undefined, 'background menu has an explicit off action (#27)')
-    disableBackground.click()
-    assert.ok(await waitUntil(() => view.querySelector('[data-mode="blank"]') !== null), 'animated background is disabled')
-    backgroundDockButton.click()
-    await waitForSelector(view, '[role="menu"]')
-    const restoredBackgroundMenu = view.querySelector('[role="menu"]')
-    const dotsBackground = [...restoredBackgroundMenu.querySelectorAll('button')]
-      .find(button => button.textContent?.trim() === '点阵')
-    assert.ok(dotsBackground !== undefined, 'background menu still exposes visual modes')
-    dotsBackground.click()
-    assert.ok(await waitUntil(() => view.querySelector('[data-mode="dots"]') !== null), 'visual background mode can be restored')
+    // The floating dock (magnification, workflow runner, canvas background
+    // menu) was removed from the fork: no source file renders `[data-dock-item]`
+    // or `[role="toolbar"]` any more, and the background menu lives only in the
+    // removed UI. Those three regressions are unreachable, so they are not
+    // asserted; the canvas-body assertions below still cover the workspace.
 
     const nodeTool = (nodeId, label) => view.querySelector(`[data-node-id="${nodeId}"] [title^="${label}"]`)
     assert.ok(nodeTool('node-image', '标注') !== null, '标注 button rendered')
@@ -6843,6 +6117,7 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     const cardArea2 = view.querySelector('textarea[placeholder^="描述这个框里要改成什么"]')
     assert.ok(cardArea2 !== null, 'a second box produced a new prompt card')
     // Type the box prompt; the debounced save carries it into the document.
+    const nativeTextAreaSetter = Object.getOwnPropertyDescriptor(jsdomWindow.HTMLTextAreaElement.prototype, 'value').set
     nativeTextAreaSetter.call(cardArea2, '把这里换成一只橘猫')
     cardArea2.dispatchEvent(new jsdomWindow.Event('input', { bubbles: true }))
     await waitUntil(() => (canvasSaves.at(-1)?.nodes ?? []).some(node => node.metadata?.text === '把这里换成一只橘猫'))
@@ -7257,9 +6532,8 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
       ...canvasDocument.nodes,
       { id: 'node-covered', type: 'text', title: '会被盖住的小卡片', x: 0, y: 1200, width: 100, height: 80, metadata: { status: 'idle', text: '' } },
     ]
-    ecommerceSwitch.click()
-    await new Promise(resolve => setTimeout(resolve, 60))
-    canvasSwitch.click()
+    await openGalleryWorkspace()
+    await openCanvasWorkspace()
     await waitForSelector(view, '[data-node-id="node-covered"]')
     {
       const coveredEl = view.querySelector('[data-node-id="node-covered"]')
@@ -7317,9 +6591,8 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
       ...canvasDocument.nodes,
       { id: 'node-file', type: 'file', title: 'notes.txt', x: 0, y: 640, width: 300, height: 170, metadata: { asset: canvasFileAsset, fileKind: 'text', status: 'success' } },
     ]
-    ecommerceSwitch.click()
-    await new Promise(resolve => setTimeout(resolve, 60))
-    canvasSwitch.click()
+    await openGalleryWorkspace()
+    await openCanvasWorkspace()
     await waitForSelector(view, '[data-node-id="node-file"]')
     assert.ok(await waitUntil(() => previewRequests.some(request => request.assetId === canvasFileAsset.assetId)), 'the node asked the host to decode the file')
     assert.ok(
@@ -7343,9 +6616,8 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
       ...canvasDocument.nodes,
       { id: 'node-pdf', type: 'file', title: 'paper.pdf', x: 0, y: 900, width: 300, height: 170, metadata: { asset: canvasPdfAsset, fileKind: 'pdf', status: 'success' } },
     ]
-    ecommerceSwitch.click()
-    await new Promise(resolve => setTimeout(resolve, 60))
-    canvasSwitch.click()
+    await openGalleryWorkspace()
+    await openCanvasWorkspace()
     await waitForSelector(view, '[data-node-id="node-pdf"] object[type="application/pdf"]')
     const pdfBody = view.querySelector('[data-node-id="node-pdf"] object[type="application/pdf"]')
     assert.match(pdfBody.getAttribute('data'), /\?inline=1$/, 'the node embeds the inline URL')
@@ -7396,7 +6668,17 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     // there. Two touch pointers moving apart must raise the viewport scale.
     const viewportEl = view.querySelector('[class*="viewport"]')
     assert.ok(viewportEl !== null, 'the canvas viewport is mounted')
-    const zoomPercent = () => Number((view.querySelector('[class*="zoomValue"]')?.textContent ?? '0').replace('%', ''))
+    // The zoom readout lived in the dock's zoom controls, which the fork
+    // removed; the scale applied to the world layer is the same fact, read
+    // straight from the transform the viewport writes.
+    const zoomPercent = () => {
+      const worlds = [...view.querySelectorAll('[data-canvas-workspace] [class*="world"]')]
+      for (const world of worlds) {
+        const match = /scale\(([-\d.]+)\)/.exec(world.style.transform ?? '')
+        if (match !== null) return Math.round(Number(match[1]) * 100)
+      }
+      return 0
+    }
     const beforePinch = zoomPercent()
     // jsdom has no PointerEvent: the handler reads clientX/clientY/pointerId/
     // pointerType off the event object, so a MouseEvent with those fields added
@@ -7425,18 +6707,10 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     await new Promise(resolve => setTimeout(resolve, 40))
     assert.equal(zoomPercent(), afterPinch, 'the gesture ends cleanly when the fingers lift')
 
-    // (3) Space on a focused button must activate it, not start a canvas pan.
-    // The panel-wide keydown claims Space for the hand tool and preventDefaults
-    // it, which ate the standard activation key of every button in the panel.
-    const dockButton = view.querySelector('[data-canvas-workspace] [role="toolbar"] button')
-    assert.ok(dockButton !== null, 'the dock has a button to focus')
-    let spaceDefaultPrevented = false
-    const spaceProbe = new jsdomWindow.KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true })
-    dockButton.dispatchEvent(spaceProbe)
-    spaceDefaultPrevented = spaceProbe.defaultPrevented
-    await new Promise(resolve => setTimeout(resolve, 40))
-    assert.equal(spaceDefaultPrevented, false, 'Space on a focused button is left to the button, not eaten by the pan tool')
-    // ...while Space on the canvas background still starts the hand tool.
+    // (3) Space on the canvas background still arms the hand tool. The
+    // focused-button half of this check drove a dock button, and the dock was
+    // removed from the fork; the background half is the claim that still has
+    // a live surface.
     const backgroundProbe = new jsdomWindow.KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true })
     viewportEl.dispatchEvent(backgroundProbe)
     assert.equal(backgroundProbe.defaultPrevented, true, 'Space on the canvas background still arms the pan tool')
@@ -7451,33 +6725,16 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
       // 那条断言的对象。
       { id: 'node-clip-2', type: 'video', title: 'clip-2.mp4', x: 300, y: 1200, width: 260, height: 160, metadata: { video: { url: 'data:video/mp4;base64,AAAA', mime: 'video/mp4', width: 320, height: 240, duration: 3 }, status: 'success' } },
     ]
-    ecommerceSwitch.click()
-    await new Promise(resolve => setTimeout(resolve, 60))
-    canvasSwitch.click()
+    await openGalleryWorkspace()
+    await openCanvasWorkspace()
     await waitForSelector(view, '[data-node-id="node-clip"]')
     view.querySelector('[data-node-id="node-clip"] [title="放大预览"]').dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true }))
     await waitForSelector(view, '[data-video-preview]')
     jsdomWindow.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     assert.ok(await waitUntil(() => view.querySelector('[data-video-preview]') === null), 'Escape closes the in-canvas video preview')
 
-    // The timeline editor is the door to trims and transitions: it has to be in
-    // the dock, it has to take the canvas clips in canvas order, and Escape has
-    // to close it without clearing the selection behind it (the same rule the
-    // preview above follows).
-    const timelineButton = view.querySelector('[data-dock-item][data-label="时间线编辑"] button')
-    assert.ok(timelineButton !== null, 'the dock carries a timeline entry')
-    timelineButton.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true }))
-    assert.ok(await waitUntil(() => view.querySelector('[data-timeline-panel]') !== null), 'the timeline entry opens the editor')
-    const timelineSegments = [...view.querySelectorAll('[data-timeline-segment]')]
-    assert.deepEqual(
-      timelineSegments.map(segment => segment.getAttribute('data-timeline-segment')),
-      ['node-clip', 'node-clip-2'],
-      'the timeline lists exactly the canvas clips, in canvas order',
-    )
-    const timelineTotal = view.querySelector('[data-timeline-total]')?.textContent ?? ''
-    assert.ok(timelineTotal.includes('0:05.0'), `the timeline reports the summed length (got "${timelineTotal}")`)
-    jsdomWindow.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    assert.ok(await waitUntil(() => view.querySelector('[data-timeline-panel]') === null), 'Escape closes the timeline editor')
+    // The timeline editor (TimelinePanel) ships but has no reachable entry:
+    // its only door was the dock's 「时间线编辑」 item, removed with the dock.
 
     // Identity anchoring: a right-click pins the image, the dialog names it, the
     // node shows the pin, and the pin reaches the SAVED document (the whole
@@ -7526,19 +6783,9 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     // why the legend exists at all. Four things must hold, and each one fails
     // independently: the dock opens it, `?` opens it, Esc closes it, and the
     // dock's own undo tooltip names the key.
-    const helpButton = view.querySelector('[data-canvas-workspace] [role="toolbar"] button[aria-label="快捷键"]')
-    assert.ok(helpButton !== null, 'the dock carries a shortcut entry')
-    helpButton.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true }))
-    assert.ok(await waitUntil(() => view.querySelector('[data-shortcut-help]') !== null), 'the dock entry opens the legend')
-    const legend = view.querySelector('[data-shortcut-help]')
-    assert.ok(legend.querySelectorAll('kbd').length >= 20, 'the legend lists the real bindings, not a placeholder')
-    assert.ok(
-      (legend.textContent ?? '').includes('Ctrl/⌘+Z') === false,
-      'modifier combinations render as separate key chips, not one fused token',
-    )
-    jsdomWindow.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    assert.ok(await waitUntil(() => view.querySelector('[data-shortcut-help]') === null), 'Escape closes the legend')
-
+    // (6) The keyboard map has to be REACHABLE. Its dock button went with the
+    // dock; `?` is the entry that survives, so the legend, its content and its
+    // dismissal are asserted through that path.
     const questionProbe = new jsdomWindow.KeyboardEvent('keydown', { key: '?', bubbles: true, cancelable: true })
     // Re-queried, not the `viewportEl` captured before step (4): that block
     // remounts the canvas, so the old node is detached and its events never
@@ -7552,8 +6799,8 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     jsdomWindow.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     assert.ok(await waitUntil(() => view.querySelector('[data-shortcut-help]') === null), 'Escape closes the one ? opened')
 
-    const undoLabel = view.querySelector('[data-canvas-workspace] [role="toolbar"] button[aria-label^="撤销"]')?.getAttribute('aria-label') ?? ''
-    assert.ok(undoLabel.includes('Ctrl/⌘+Z'), `the undo control names its key (got "${undoLabel}")`)
+    // The dock's undo tooltip named Ctrl/⌘+Z; the dock is gone, so the
+    // binding is covered by the legend assertions above.
 
     // (5) The image picker must clear its file input, so re-picking the same
     // file after a failure still fires `change`. A stale value makes the retry

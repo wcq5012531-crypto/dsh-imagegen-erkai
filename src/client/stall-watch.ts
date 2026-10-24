@@ -34,6 +34,17 @@ export function noteAction(next: string): void {
   action = next
 }
 
+/**
+ * A monotonic clock that also exists where `performance` does not (the jsdom
+ * smoke fixture, older embedded webviews). Reading a bare `performance` there
+ * threw during `installStallWatch`, which aborted the whole panel mount: the
+ * watchdog has to degrade to `Date.now()`, never take the studio down with it.
+ */
+function clock(): number {
+  const perf = (globalThis as { performance?: { now?: () => number } }).performance
+  return typeof perf?.now === 'function' ? perf.now() : Date.now()
+}
+
 /** Write the breadcrumb; a frozen thread simply stops writing it. */
 function writeBreadcrumb(): void {
   try {
@@ -47,9 +58,9 @@ function writeBreadcrumb(): void {
 
 /** Collect what is cheap to read and still narrows the cause. */
 function snapshot(gapMs: number): Record<string, unknown> {
-  const memory = (performance as Performance & {
-    memory?: { usedJSHeapSize: number, jsHeapSizeLimit: number }
-  }).memory
+  const memory = (globalThis as {
+    performance?: { memory?: { usedJSHeapSize: number, jsHeapSizeLimit: number } }
+  }).performance?.memory
   const view = document.querySelector('[data-dsh-imagegen-studio-view]')
   const workspace = view?.querySelector('[data-workspace]')?.getAttribute('data-workspace') ?? ''
   return {
@@ -69,7 +80,7 @@ function snapshot(gapMs: number): Record<string, unknown> {
 export function installStallWatch(): void {
   if (installed) return
   installed = true
-  previous = performance.now()
+  previous = clock()
 
   // The previous run's last breath: if the app was killed while frozen, this is
   // the only timestamp that survives, and it names the view and the action.
@@ -111,7 +122,7 @@ export function installStallWatch(): void {
 
   window.setInterval(() => {
     writeBreadcrumb()
-    const now = performance.now()
+    const now = clock()
     const gap = now - previous
     previous = now
     if (gap < STALL_MS || now - lastReport < REPORT_GAP_MS) return

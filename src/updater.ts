@@ -9,19 +9,21 @@ export type { UpdateInfo } from './protocol.ts'
 
 /** Keep this in sync with package.json for each published release. */
 export const CURRENT_VERSION = PLUGIN_VERSION
-export const RELEASES_URL = 'https://api.github.com/repos/q253595422/dsh-imagegen-video/releases/latest'
+export const RELEASES_URL = 'https://api.github.com/repos/wcq5012531-crypto/dsh-imagegen-erkai/releases/latest'
 
 /** The one bundle this updater is allowed to report as installed. */
 export const PACKAGE_NAME = 'dsh-imagegen-studio'
 
 /**
  * dsh-imagegen-studio fork: the upstream release channel belongs to
- * `@q253595422/dsh-imagegen-video`. Following it would download and install a
- * package that has none of the studio additions — protocol adapters, replicate,
- * duration continuation — over the linked local checkout. The self-updater is
- * therefore switched off: the update panel reports "已是最新" and points at the
- * local checkout, and every lifecycle change goes through the checkout + rebuild
- * path documented in `docs/studio-maintenance.md`.
+ * `@q253595422/dsh-imagegen-video`, and this fork now publishes its own
+ * repository and package instead. Following the upstream channel would
+ * download and install a package that has none of the studio additions —
+ * protocol adapters, replicate, duration continuation — over the linked local
+ * checkout, and until this fork cuts releases there is nothing for the updater
+ * to install. It is therefore switched off: the update panel reports "已是最新" and
+ * points at the fork repository, and every lifecycle change goes through the
+ * checkout + rebuild path documented in `docs/studio-maintenance.md`.
  */
 const SELF_UPDATE_DISABLED = true
 
@@ -31,7 +33,7 @@ function localNoUpdate(): UpdateInfo {
     currentVersion: CURRENT_VERSION,
     latestVersion: CURRENT_VERSION,
     updateAvailable: false,
-    releaseUrl: 'https://github.com/local/dsh-imagegen-studio',
+    releaseUrl: 'https://github.com/wcq5012531-crypto/dsh-imagegen-erkai',
     releaseNotes: 'dsh-imagegen-studio 是本地维护分支：在本地 checkout 中修改、重建后生效，不跟随上游发布通道自动更新。',
   }
 }
@@ -86,7 +88,7 @@ interface GitHubRelease {
  * archive — a source tarball, a checksum bundle, anything a maintainer attaches
  * later — from winning the ranking by alphabetical accident.
  */
-const ARCHIVE_NAME = 'q253595422-dsh-imagegen-video'
+const ARCHIVE_NAME = 'dsh-imagegen-studio'
 
 /**
  * GitHub names its auto-generated source archives `<repo>-<tag>.tar.gz`, and
@@ -98,7 +100,7 @@ const ARCHIVE_NAME = 'q253595422-dsh-imagegen-video'
  * name rather than outranked. (GitHub's `.zip` variant never gets this far —
  * the extension filter below only accepts `.tgz` / `.tar.gz`.)
  */
-const SOURCE_ARCHIVE_NAME = /^dsh-imagegen-video-.+\.tar\.gz$/i
+const SOURCE_ARCHIVE_NAME = /^dsh-imagegen-erkai-.+\.tar\.gz$/i
 
 /**
  * Pick the release asset to install from. Only archives are considered, and
@@ -179,7 +181,7 @@ export async function checkForUpdate(fetchFn: typeof fetch = fetch, now = Date.n
   if (release.draft === true || release.prerelease === true) throw new Error('latest GitHub Release is not stable')
   const latestVersion = normalizedReleaseVersion(release.tag_name)
   if (latestVersion === undefined) throw new Error('latest GitHub Release has an invalid version tag')
-  const releaseUrl = typeof release.html_url === 'string' ? release.html_url : 'https://github.com/q253595422/dsh-imagegen-video/releases'
+  const releaseUrl = typeof release.html_url === 'string' ? release.html_url : 'https://github.com/wcq5012531-crypto/dsh-imagegen-erkai/releases'
   const releaseNotes = typeof release.body === 'string' ? release.body.trim() : ''
   const tarballUrl = installableAssetUrl(release.assets, latestVersion)
   const value: UpdateInfo = {
@@ -539,7 +541,7 @@ async function installThroughHost(
 
 /** Read the version this plugin's own manifest records in a profile, if any. */
 async function installedManifestVersion(profileDir: string): Promise<string | undefined> {
-  const manifestPath = join(profileDir, 'node_modules', '@q253595422', 'dsh-imagegen-video', 'package.json')
+  const manifestPath = join(profileDir, 'node_modules', 'dsh-imagegen-studio', 'package.json')
   try {
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as { name?: unknown; version?: unknown }
     if (manifest.name !== PACKAGE_NAME || typeof manifest.version !== 'string') return undefined

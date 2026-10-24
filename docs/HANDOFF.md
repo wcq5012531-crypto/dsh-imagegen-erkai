@@ -213,3 +213,54 @@
 缺 `@deepseek-ai/dsh-scope`，是**本机没装宿主依赖**，不是回归；store 用例绕开了这一层，
 直接用 Node 24 的类型剥离跑源码。
 
+## 13. 筛选栏重做 / 挂载健壮性 / 冒烟套件转绿（1.16.3–1.16.5）
+
+1. **素材库筛选栏三段化（1.16.3）**：截图里的自相矛盾是同一列里同时塞了「来源（全部素材/
+   文生图/图生图）」和模型名，标题却叫「分类」，下面又问「还没有分类」。现在分三段——
+   来源（只放真实来源）、模型（库里真有图的模型才出现）、分类（用户的标签 + 管理入口）；
+   比例只在库里出现 ≥2 种时渲染，且值取自条目本身（`normalizeSize`），不再列固定 8 种。
+2. **挂载健壮性（1.16.4）**：`stall-watch` 原来直接读裸 `performance`，在 jsdom/内嵌
+   WebView 里抛 `ReferenceError`，被 `mountUi` 的兜底 catch 吞掉，表现就是「侧栏标签在、
+   工作室空白」。改成 `clock()`（有 `performance.now` 用之，否则 `Date.now()`），堆内存
+   快照也改成可选读取——诊断设施不该拖垮面板。
+3. **更新通道指回自己的仓库（1.16.4）**：`RELEASES_URL`、面板 GitHub 图标、profile 清单
+   全部指向 `wcq5012531-crypto/dsh-imagegen-erkai`；自更新仍关闭（`SELF_UPDATE_DISABLED`）。
+4. **版本号单点（1.16.4 起）**：`package.json` 与 `src/protocol.ts` 的 `PLUGIN_VERSION`
+   必须一致，冒烟 A1 钉住这一对值（之前漂过三个版本）。
+5. **历史视频行回到结果看板（1.16.5）**：`openVideoFromHistory` 原来走 `openTab('text')`，
+   而面板收敛成三个标签后这个 helper 对非素材库标签一律切去 studio，studio 没有播放器——
+   行会高亮、画面不动。现在显式要求经典工作区的结果看板。
+6. **冒烟 E1 按真实界面收敛（1.16.5）**：底栏 Dock、导航里的电商模式/图片转 PPT、模板库
+   抽屉、电商整套图提交流这些入口在二开里已不存在，用例改成走仍然存在的路径，或在原位留
+   一行说明。`node scripts/smoke.mjs` 89/89。
+
+### 套件里踩到的坑（都已修，别再踩）
+
+- `scripts/verify-tracked.mjs`：`git ls-files` 输出用 `/`，与 `readdir` 的 `\` 直接比较会
+  在 Windows 上永远不等——比较前统一 `replace(/\\/g, '/')`。
+- `scripts/verify-reproducible.mjs`：用 `spawnSync(process.execPath, ['build'])` 调不到
+  tsdown 入口，改成跑 `tsdown` 实际 bin。
+- `scripts/smoke-storyboard.mjs`：`new URL(...).pathname` 在 Windows 上得到 `/C:/...`，
+  必须 `fileURLToPath`。
+- `smoke-video-picker` / `smoke-canvas-video`：底栏 Dock 已拆，入口改成画布空白处右键菜单
+  的「添加视频」；选中态 / 清空选中走 `clearSelection()`（Esc 等价）。
+- `smoke-code-render` 的 C4c（超时截断）：视频渲染在帧循环之前先找 ffmpeg，本机没有 ffmpeg
+  就永远到不了 deadline（会先报 `render-no-ffmpeg`，由 C4d 覆盖），所以 C4c 在无 ffmpeg 时
+  打印 SKIP 并返回，而不是断言一个本机到不了的状态。
+- 跑冒烟前必须先 `npm run build`：E1 加载的是 `lib/client.js`，改 `src/` 不重建等于白跑。
+
+### 本机验证环境
+
+- `node_modules\@deepseek-ai\dsh-scope` 是 junction，指向宿主自带副本
+  `C:\Users\Administrator\AppData\Local\Programs\DSH Desktop\resources\app\node_modules\@deepseek-ai\dsh-scope`。
+- `verify-ui-contracts.mjs` 需要 `CHROME_HEADLESS_SHELL='C:\Program Files\Google\Chrome\Application\chrome.exe'`。
+- 本机无 ffmpeg：代码渲染只覆盖静帧路径。
+
+### 当前状态
+
+`node scripts/verify-tracked.mjs`、`verify-reproducible.mjs`、`smoke.mjs`（89）、
+`smoke-storyboard.mjs`、`smoke-code-render.mjs`、`smoke-canvas-video.mjs`、
+`smoke-video-picker.mjs`、`verify-ui-contracts.mjs`（24）、`verify-stores.mjs`（20）
+九个套件全绿；`lib/index.js` 862.89 kB、`lib/client.js` 2,732,016 B；已同步到
+`profiles\web\vendor\dsh-imagegen-studio`，**彻底退出 DSH Desktop 再重开**才生效。
+

@@ -2052,7 +2052,14 @@ export function ImageGenPanel(props: {
     // fills) rather than only flipping tabs: clicking a history row is "show me
     // that generation", and for a clip that means playing it where the user is
     // already looking. The video tab stays reachable for new runs.
-    openTab('text')
+    //
+    // Deliberately NOT `openTab('text')`: since the classic form was reduced to
+    // 素材库, that helper routes every other tab into the studio workspace, and
+    // the studio has no clip board — the row would go active and nothing would
+    // appear to happen. The board only paints when the classic workspace owns
+    // the panel, so ask for that directly.
+    setWorkspace('normal')
+    setTab('text')
     setImages([])
     setComparison(null)
     setViewingHistoryId(null)
@@ -3120,7 +3127,7 @@ export function ImageGenPanel(props: {
           <h2 className={css.panelTitle}>{tt('panel.title')}</h2>
           <a
             className={css.githubLink}
-            href="https://github.com/q253595422/dsh-imagegen-video"
+            href="https://github.com/wcq5012531-crypto/dsh-imagegen-erkai"
             target="_blank"
             rel="noreferrer"
             title={tt('panel.githubTip')}
