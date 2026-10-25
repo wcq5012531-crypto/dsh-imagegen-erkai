@@ -63,7 +63,7 @@ dsh plugin --profile web add ./dsh-imagegen-studio-<版本>.tgz
 ```jsonc
 // <DSH_HOME>/profiles/web/package.json
 {
-  "dependencies": { "dsh-imagegen-studio": "file:./dsh-imagegen-studio-1.16.9.tgz" },
+  "dependencies": { "dsh-imagegen-studio": "file:./dsh-imagegen-studio-<版本>.tgz" },
   "dsh": {
     "profile": {
       "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-imagegen-studio"]
@@ -87,6 +87,9 @@ dsh plugin --profile web add ./dsh-imagegen-studio-<版本>.tgz
 - **升级：**重复执行 `add` 命令指向新版本即可；插件也会在面板中提示新版本。更新后重启 `dsh web`。
 - **DSH Desktop 用户：**宿主 CLI 不允许写入 `desktop` 这个 profile，所以面板不会假装去更新，而是直接给出可复制的命令和下载地址，由你自己执行——不会只甩一句「更新失败」而没有原因。
 - 渠道配置、历史记录和画廊数据保存在 DSH 宿主侧，正常升级不会清空。
+- **宿主依赖不写进 `peerDependencies`：**`@deepseek-ai/*`（如 `@deepseek-ai/schemastery`）由 DSH 宿主在运行时
+  提供，解析由宿主的 `host-module-fallback.mjs` 兜底。把它写成 peer 会让 Profile 的通用依赖检查器把它当成
+  「缺包」报红——照着提示装一份到 Profile 里，反而会和宿主抢同一个单例。
 
 </details>
 

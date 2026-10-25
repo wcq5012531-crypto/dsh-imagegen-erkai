@@ -5,6 +5,13 @@ Attribution for third-party code is in [NOTICE](./NOTICE).
 
 ## Releases
 
+### 1.16.10 不再把宿主依赖写成 peer（消除「依赖缺失」误报）
+- **`@deepseek-ai/schemastery` 从 `peerDependencies` 移除。** 这个包由 DSH 宿主在运行时直接提供：
+  宿主的 `resources/host-module-fallback.mjs` 对任何 `@deepseek-ai/*` 的解析失败都会回落到宿主入口，
+  所以 Profile 里本来就不该装它。写在 peer 里只会让依赖检查器（例如 `dsh-my-guardian`）把它判成
+  「缺包」并提示去安装——用户照做就会在 Profile 里塞进一份副本，和宿主抢同一个单例。
+- 运行时行为不变：插件照旧 `import '@deepseek-ai/schemastery'`，解析走宿主兜底；`lucide-react`
+  是被打进 `lib/client.js` 的普通依赖，保持不变。
 ### 1.16.9 — 能从 GitHub 直接装；同源插件撞车就报错
 
 - **`lib/` 入库。** 以前 `lib/` 被忽略，从 git 装要现场跑一次 `tsdown`，而 pnpm 默认禁止
