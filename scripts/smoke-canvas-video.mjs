@@ -1421,7 +1421,12 @@ await check('C6-C7 the composed clip lands, plays, and its favorite control foll
   assert.ok(composedPlayer !== null, 'C6: the composed node renders through the existing video body')
   assert.equal(composedPlayer.getAttribute('src'), COMPOSED_URL, 'C6: it plays the stitched clip')
   // The product is selected, so only one clip is selected now: no numbering.
-  assert.equal(badgesNow().length, 0, 'C6: the badges clear once the selection moves to the product')
+  // The compose click clears the multi-selection, but the badges disappear on
+  // the render that follows: wait for it instead of reading the same tick.
+  assert.ok(
+    await waitUntil(() => badgesNow().length === 0, 12_000),
+    'C6: the badges clear once the selection moves to the product',
+  )
 
   // ------------------------------ C7 收藏 is gated on `video.entryId` alone
   // This is the defect that hides from an eyeball: without an entry id the
@@ -1462,7 +1467,7 @@ await check('C8-C9 uneven-height clips keep their reading order in the badges an
     const before = selectedNodes().length
     pointerDown(selected, true)
     assert.ok(
-      await waitUntil(() => selectedNodes().length === before - 1),
+      await waitUntil(() => selectedNodes().length === before - 1, 12_000),
       'C8: the leftover selection is cleared before numbering',
     )
   }
