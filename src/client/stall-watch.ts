@@ -73,6 +73,11 @@ function snapshot(gapMs: number): Record<string, unknown> {
     nodes: document.querySelectorAll('*').length,
     heapUsedMb: memory === undefined ? null : Math.round(memory.usedJSHeapSize / 1_048_576),
     heapLimitMb: memory === undefined ? null : Math.round(memory.jsHeapSizeLimit / 1_048_576),
+    // 判据：`hidden: true` 的 60 秒空档是浏览器在节流，不是主线程被卡住。
+    // 只有 `hidden: false` 的长空档才是真的冻结。
+    visibility: document.visibilityState,
+    hidden: document.visibilityState !== 'visible',
+    focused: typeof document.hasFocus === 'function' ? document.hasFocus() : null,
   }
 }
 

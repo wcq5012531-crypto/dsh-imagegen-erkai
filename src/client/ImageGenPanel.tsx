@@ -387,13 +387,18 @@ function useSidebarHistoryHost(): HTMLDivElement | null {
     document.querySelector<HTMLDivElement>('[data-dsh-imagegen-studio-history-host]')
   ))
   useEffect(() => {
-    const sync = (): void => {
-      setHost(document.querySelector<HTMLDivElement>('[data-dsh-imagegen-studio-history-host]'))
-    }
-    sync()
-    const observer = new MutationObserver(sync)
-    observer.observe(document.body, { childList: true, subtree: true })
-    return () => observer.disconnect()
+    const find = (): HTMLDivElement | null => (
+      document.querySelector<HTMLDivElement>('[data-dsh-imagegen-studio-history-host]')
+    )
+    // 宿主只由 sidebar-entry 建一次，不必监听整页 DOM：面板挂着的时候，对话的
+    // 每一次流式渲染都会惊动观察者。一秒一次的重新定位只有一次 querySelector
+    // 的成本，引用相等时跳过 setState，不会带来多余重渲染。
+    setHost(find())
+    const timer = window.setInterval(() => {
+      const next = find()
+      setHost(previous => (previous === next ? previous : next))
+    }, 1000)
+    return () => { window.clearInterval(timer) }
   }, [])
   return host
 }

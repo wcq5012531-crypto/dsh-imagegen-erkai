@@ -318,6 +318,7 @@ export function mountSidebarEntry(
   let applying = false
   let passes = 0
   let windowStart = 0
+  let entryObserver: MutationObserver | undefined
 
   const runEnsure = (): void => {
     if (applying) return
@@ -329,7 +330,7 @@ export function mountSidebarEntry(
     }
     passes += 1
     if (passes > 40) {
-      bodyObserver.disconnect()
+      entryObserver?.disconnect()
       applying = false
       console.warn(
         '[dsh-imagegen-studio] sidebar self-heal paused: the shell rewrote its sidebar faster than the entry could settle',
@@ -342,7 +343,9 @@ export function mountSidebarEntry(
       console.warn('[dsh-imagegen-studio] sidebar entry repair failed:', error)
     } finally {
       applying = false
-      bodyObserver.takeRecords()
+      // Drop the records our own writes queued, if any: a pass must never
+      // schedule the next pass by itself.
+      entryObserver?.takeRecords()
     }
   }
 
@@ -356,17 +359,41 @@ export function mountSidebarEntry(
       scheduled = false
       if (applying) return
       runEnsure()
+      // A pass may have replaced the root (the host rebuilt its sidebar); the
+      // observer has to follow it, or the next remount goes unseen.
+      if (root !== undefined && root !== watchedRoot && root.isConnected) {
+        try { watchRoot() } catch { /* observer wiring is best effort */ }
+      }
     }, 0)
   }
 
-  const bodyObserver = new MutationObserver(scheduleEnsure)
-  bodyObserver.observe(document.body, { childList: true, subtree: true })
+  // Observing `document.body` on a long conversation is a multiplier: every
+  // streamed token mutates the transcript, every mutation schedules a pass, and
+  // every pass re-queries the shell. Watch the sidebar root instead — the part
+  // this entry actually owns — and keep a one-second guard for the one thing a
+  // scoped observer cannot see, namely the host swapping that root out. The
+  // guard only reads `isConnected`, so a settled shell costs three booleans a
+  // second instead of a pass per mutation.
+  entryObserver = new MutationObserver(scheduleEnsure)
+  let watchedRoot: HTMLElement | undefined
+  const watchRoot = (): void => {
+    if (watchedRoot === root) return
+    entryObserver?.disconnect()
+    watchedRoot = root
+    if (root !== undefined) entryObserver?.observe(root, { childList: true, subtree: true })
+  }
+  const guard = window.setInterval(() => {
+    if (tabs !== undefined && tabs.isConnected && root !== undefined && root.isConnected) return
+    scheduleEnsure()
+  }, 300)
   const unsubscribe = controller.subscribe(syncActive)
   runEnsure()
+  watchRoot()
 
   return () => {
     window.clearTimeout(unmountedTimer)
-    bodyObserver.disconnect()
+    window.clearInterval(guard)
+    entryObserver?.disconnect()
     unsubscribe()
     tabs?.remove()
     historyHost?.remove()

@@ -295,3 +295,40 @@
 
 验证：`npm run build`（`lib/client.js` 2,734,015 B）后九个套件全绿；`node scripts/smoke.mjs`
 仍 89/89（只换了那段断言的内容，条目数不变）。
+
+## 15. 观察者收窄与卡顿判据（1.16.7）
+
+用户报告（2026-10-25 20:03）：「刚才又出现界面卡的情况了」。查 `studio/out/stall.log`：
+
+| 时间(UTC) | 现场 | 节点数 | 空档 |
+| --- | --- | --- | --- |
+| 10:56:26 | normal, 1 panel | 30318 | 42s |
+| 10:57:26 | normal, 1 panel | 30463 | 60s |
+| 10:58:26 | normal, 1 panel | 30639 | 60s |
+| 12:00–12:03 | studio | 18602（不变） | 60s ×3 |
+
+两点结论：
+
+1. **60 秒整的空档多半是节流，不是冻结。** 窗口隐藏/被遮挡时 Chromium 会把定时器节流到
+   每分钟一次，与主线程卡死的心跳空档长得一样。记录新增 `visibility` / `hidden` /
+   `focused`，以后直接看 `hidden`。
+2. **插件侧的放大效应确实存在。** `normal` 现场有 3 万节点，而插件历史/素材库目录基本是空的
+   （`harness\dsh-imagegen-studio\gallery\images` 空、没有 history 索引），说明这些节点是
+   对话本身。这种页面上，插件原来有两处「整页 DOM 观察者」，每次 DOM 变动都要做一遍全页查询：
+
+   - `src/client/sidebar-entry.ts`：`observe(document.body, {childList, subtree})` → 每次变动排
+     一个修复 pass（pass 内要重新走 `placeTabs` / `placeHistoryHost` / `pruneDuplicates`）。
+     现在只观察侧栏根节点；「宿主把侧栏整块换掉」是窄观察者看不到的情况，交给 300 ms 守卫
+     （只读 `tabs.isConnected` / `root.isConnected`）。pass 里发现根变了会重新挂观察者。
+   - `src/client/ImageGenPanel.tsx` 的 `useSidebarHistoryHost`：整页观察者里做
+     `document.querySelector`。现在 1 秒一次的单次查询，引用相等就跳过 setState。
+
+   效果：稳定界面上，原来「每次 DOM 变动 = 一次全页查询」，现在「每次 DOM 变动 = 零次查询」。
+   `mount.tsx` 的那个整页观察者保留——它的回调只是 `container.isConnected`，本来就便宜。
+
+真正的卡顿源仍是**超大会话**：本机当前会话压缩后 5.34 MB（`session.v4.jsonl.zstd`），
+解压后三千万级节点 / 数千帧，对话页全量重渲染与插件无关（HANDOFF §6 已记录，仍待在新会话里
+复验）。二开能做的只有把自己的边际成本压到零，这一版做的就是这个。
+
+验证：`npm run build`（`lib/client.js` 2,734,732 B）、`node scripts/smoke.mjs` 89/89，
+九个套件全绿，已同步到 `profiles\web\vendor\dsh-imagegen-studio`。

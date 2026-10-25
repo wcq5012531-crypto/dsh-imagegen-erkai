@@ -5,6 +5,19 @@ Attribution for third-party code is in [NOTICE](./NOTICE).
 
 ## Releases
 
+### 1.16.7 — 观察者不再盯着整页 DOM
+
+- **两处整页 `MutationObserver` 收窄。** 侧栏入口原来是
+  `observe(document.body, { childList: true, subtree: true })`：对话每流式渲染一次，观察者就排一次
+  修复 pass，而 pass 要把壳层重新查一遍。现在只观察侧栏根节点；「宿主把侧栏整块换掉」是窄观察者
+  唯一看不到的情况，交给一个 300 ms 的守卫——它只读三次 `isConnected`，安定的界面每秒零成本。
+  素材库定位历史宿主同理，从整页观察到 1 秒一次的单次 `querySelector`。
+- 会话越长收益越大：三万节点的页面上，这两处原来等于「每次 DOM 变动 = 一次全页查询」，现在
+  「每次 DOM 变动 = 零次查询」。
+- **卡顿日志现在分得清「被节流」和「真冻结」。** 等待守卫的心跳在窗口隐藏时同样会被浏览器
+  节流成每分钟一次，日志里看起来和主线程卡死一模一样。记录多了 `visibility` / `hidden` /
+  `focused`：`hidden: true` 的 60 秒空档是节流，`hidden: false` 的长空档才是真的卡住。
+
 ### 1.16.6 — 素材库只剩一条货架，画布上的图右键就能入库
 
 - **「来源」这一轴整个去掉了。** 上一版把四类筛选收进「分类」标题下之后，同一列里既有系统给的
