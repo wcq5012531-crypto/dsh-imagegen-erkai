@@ -5,6 +5,21 @@ Attribution for third-party code is in [NOTICE](./NOTICE).
 
 ## Releases
 
+### 1.16.9 — 能从 GitHub 直接装；同源插件撞车就报错
+
+- **`lib/` 入库。** 以前 `lib/` 被忽略，从 git 装要现场跑一次 `tsdown`，而 pnpm 默认禁止
+  git 包执行构建脚本：用户会卡在 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`，得手改
+  `pnpm-workspace.yaml` 的 allowBuilds（键里还带 commit sha，仓库一更新就失效）。现在构建
+  产物随仓库发布，`dsh plugin add` 不再需要任何构建步骤；`prepare` 脚本一并去掉，避免安装器
+  再想 build。新增 `scripts/verify-lib-sync.mjs`（挂在 `npm test` 链上）：build 完 `lib/`
+  与提交不一致就红，挡住"改了 `src/` 忘了 build"。
+- **同源插件撞车直接报错。** 新文件 `src/conflicts.ts`：启动时检查 profile 里是否启用了
+  `@q253595422/dsh-imagegen-video` 或 `@dickpy/dsh-imagegen-studio`（装了、且在
+  `dsh.profile.bundles` 里、又没被补丁行 `disabled: true` 关掉），命中就抛清楚的中文错误，
+  指明要禁用谁、为什么——不再重复注册路由与工具，也不再变成"卡在正在读取本地工作台"那种
+  没有指向的故障。
+- 验证：`npx tsc --noEmit`、`npm run build`、`npm test` 全链。
+
 ### 1.16.8 — 右键菜单：历史行和素材库卡片都能就地操作
 
 - **历史行右键。** 悬停才出现的小图标还在，但不再是唯一入口：右键任意一行，弹出的菜单列着同样的动作——

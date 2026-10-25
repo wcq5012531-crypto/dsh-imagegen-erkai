@@ -328,6 +328,7 @@ import { PptRuntime } from './ppt-runtime.ts'
 import { EDITABLE_PPT_SKILL, type ExternalSkillSummary } from './skills-catalog.ts'
 import { redactDiagnosticText } from './diagnostics-store.ts'
 import { canvasStore } from './canvas-store.ts'
+import { conflictMessage, findPluginConflicts } from './conflicts.ts'
 import { imageGenLanguageOf, interpolate } from './locale-tables.ts'
 
 /** Stable cordis plugin name. */
@@ -682,6 +683,11 @@ export function resolvePromptModelConfig(value: EffectiveConfig): PromptModelCon
  * @param config - resolved plugin config (schema defaults applied by the loader).
  */
 export function apply(ctx: Context, config?: Config): (() => void) | void {
+  // 同源插件撞车时不装：两个都注册 /api/dsh-imagegen-studio/* 和同一批工具，
+  // 先到的占住名字、后到的抛 "already registered"，用户看到的是页面卡死。
+  // 与其让它静默降级，不如在这里停住并说清楚要禁用谁。
+  const conflicts = findPluginConflicts()
+  if (conflicts.length > 0) throw new Error(conflictMessage(conflicts))
   // The live source the surfaces read: the settings section once the settings
   // service is attached, the composition entry otherwise.
   let current: () => Config = () => config ?? {}

@@ -1,9 +1,8 @@
 node_modules/
-# Anchored: an unanchored `lib/` also matches `scripts/lib/`, which silently
-# kept `scripts/lib/headless-chrome.mjs` out of the repository. Three guard
-# scripts import it, so every clean clone failed with ERR_MODULE_NOT_FOUND while
-# the working tree looked fine -- the file was on one disk only.
-/lib/
+# `lib/` 是构建产物，但**要入库**：插件市场/git 安装不会替用户跑一次 `tsdown`
+# （pnpm 默认禁止 git 包执行构建脚本），包里没有 lib/ 就装不上、或者要用户手工
+# 改 allowBuilds。源码地图 4MB，没有安装价值，单独排除。
+/lib/*.map
 *.tgz
 .build-lock/
 # Upstream port plans (diff + extracted source). Generated per run, never
