@@ -43,24 +43,27 @@
 
 需要已安装 [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) 和 Node.js 20+。
 
-本包没有发布到 npm registry，安装包由本仓库自己构建：
+本包没有发布到 npm registry。构建产物 `lib/` 随仓库一起发布，所以下面三种装法都不需要现场编译：
 
 ```bash
-git clone https://github.com/wcq5012531-crypto/dsh-imagegen-erkai.git
-cd dsh-imagegen-erkai
-npm install
-npm run build                     # 产出 lib/（宿主 index.js + 客户端 client.js）
-npm pack                          # 产出 dsh-imagegen-studio-<版本>.tgz
+# A. GitHub 地址（最省事，插件市场里粘的也是这个）
+dsh plugin --profile web add https://github.com/wcq5012531-crypto/dsh-imagegen-erkai
+
+# B. 本地目录（改过源码时用）
+dsh plugin --profile web add D:\code\dsh-imagegen-erkai
+
+# C. 自己打一个 tgz
+npm run build && npm pack
 dsh plugin --profile web add ./dsh-imagegen-studio-<版本>.tgz
 ```
 
-`.tgz` 也能当成一个普通依赖手工装进 profile（DSH Desktop 的 profile 不允许 CLI 写，
-需要自己改文件）：
+「只填包名」暂时还装不上（没发 registry）。`.tgz` 也能当成一个普通依赖手工装进 profile
+（DSH Desktop 的 profile 不允许 CLI 写，需要自己改文件）：
 
 ```jsonc
 // <DSH_HOME>/profiles/web/package.json
 {
-  "dependencies": { "dsh-imagegen-studio": "file:./dsh-imagegen-studio-1.16.8.tgz" },
+  "dependencies": { "dsh-imagegen-studio": "file:./dsh-imagegen-studio-1.16.9.tgz" },
   "dsh": {
     "profile": {
       "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-imagegen-studio"]
@@ -69,9 +72,9 @@ dsh plugin --profile web add ./dsh-imagegen-studio-<版本>.tgz
 }
 ```
 
-> ⚠️ **不要与 `@q253595422/dsh-imagegen-video` 或 `@dickpy/dsh-imagegen-studio` 同时启用。**
-> 三者注册的是同一套 `/api/dsh-imagegen-studio/*` 路由和同一个 UI 面板，同时启用会冲突
-> （表现是路由重复注册、工具重复注册，严重时整个页面卡在启动）。数据目录
+> 插件启动时会自己检查冲突：如果 profile 里同时装了 `@q253595422/dsh-imagegen-video`
+> 或 `@dickpy/dsh-imagegen-studio`，它会拒绝启动并提示先删掉或禁用对方，而不是让两个
+> 插件抢同一套 `/api/dsh-imagegen-studio/*` 路由把页面卡死。数据目录
 > `~/.dsh/dsh-imagegen-studio/` 是共用的，切换前请先备份。详见 [授权与致谢](#license)。
 
 安装后重启 `dsh web`，侧边栏会出现「生图」入口。到「设置 → 生图配置」添加提供方、填写 API 地址与密钥、检测并选择生图模型，保存后即可开始创作。Windows 若遇 PowerShell 脚本策略限制，请使用 `dsh.cmd`。

@@ -15,7 +15,7 @@ import assert from 'node:assert/strict'
 import vm from 'node:vm'
 import { EventEmitter } from 'node:events'
 import { Readable } from 'node:stream'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -120,8 +120,15 @@ await check('A1 host exports the plugin contract', () => {
   // that forgets `src/protocol.ts` makes every user look one release behind.
   assert.equal(host.CURRENT_VERSION, packageJson.version)
 })
-await check('A1b Git dependency prepare hook builds distributable artifacts', () => {
-  assert.equal(packageJson.scripts.prepare, 'tsdown')
+await check('A1b a git install needs no build step: lib/ ships with the repo', () => {
+  // pnpm refuses to run a git package's prepare script until the consumer
+  // allowlists it (keyed by commit sha, so it breaks on every push). Shipping
+  // the build output is the only shape where "paste the repo URL" installs.
+  assert.equal(packageJson.scripts.prepare, undefined, 'no prepare hook: the built lib/ ships in the repo')
+  assert.ok(packageJson.files.includes('lib'), 'lib/ must stay in package.json files')
+  for (const artifact of ['lib/index.js', 'lib/client.js']) {
+    assert.ok(existsSync(new URL(`../${artifact}`, import.meta.url)), `${artifact} must exist in the checkout`)
+  }
 })
 await check('A2 Config schema validates + marks apiKey secret', () => {
   const resolvedRefs = host.Config({ apiUrl: 'https://x/v1', apiKey: 'sk-1' })
