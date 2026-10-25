@@ -1,17 +1,18 @@
-# dsh-imagegen-video
+# dsh-imagegen-studio（erkai 二开）
 
-> **图片与视频一体化的 DSH 生图 / 生视频插件。**
-> 生图之外，本仓库提供**完整的生视频链路**，以及**画布视频节点、片段拼接**。
+> **图片与视频一体化的 DSH 生图 / 生视频插件 —— 二开分支。**
+> 在上游基础上二次开发：无限画布、协议适配层（任意 OpenAI 兼容渠道、字段名可改）、
+> 会话工作台、历史归档、素材库分类，以及跨面打通（右键入素材库 / 多选批量入画布）。
+> 包名 `dsh-imagegen-studio`，与上游 `@q253595422/dsh-imagegen-video` 注册同一套路由和面板，
+> **同一 profile 里只能启用一个**。
 > 各版本的改动见 [CHANGELOG.md](./CHANGELOG.md)，第三方代码归属见 [NOTICE](./NOTICE)。
 
 <div align="center">
-  <a href="https://github.com/q253595422/dsh-imagegen-video/releases"><img src="https://img.shields.io/github/v/release/q253595422/dsh-imagegen-video?color=cb3837&label=release" alt="Latest release" /></a>
-  &nbsp;
-  <a href="https://github.com/q253595422/dsh-imagegen-video/releases"><img src="https://img.shields.io/github/downloads/q253595422/dsh-imagegen-video/total?label=downloads&color=blue" alt="Release downloads" /></a>
-  &nbsp;
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-3b82f6.svg" alt="License" /></a>
   &nbsp;
-  <a href="https://github.com/q253595422/dsh-imagegen-video"><img src="https://img.shields.io/badge/platform-DeepSeek%20Harness-111827" alt="Platform" /></a>
+  <a href="https://github.com/wcq5012531-crypto/dsh-imagegen-erkai"><img src="https://img.shields.io/badge/repo-dsh--imagegen--erkai-111827" alt="Repository" /></a>
+  &nbsp;
+  <a href="https://github.com/wcq5012531-crypto/dsh-imagegen-erkai"><img src="https://img.shields.io/badge/platform-DeepSeek%20Harness-111827" alt="Platform" /></a>
 
   <p><strong>在 DeepSeek Harness 里，生成、编辑、管理，一站完成；图片与视频同一套工作流。</strong></p>
   <p><strong>快速导航</strong></p>
@@ -42,25 +43,36 @@
 
 需要已安装 [DeepSeek Harness](https://github.com/deepseek-ai/DeepSeek-Harness) 和 Node.js 20+。
 
-安装包有两个来源：**npm registry**（推荐，包名即版本，`npm view` 能查、能被锁文件盯住）与 **GitHub Release 资产**（每次附带 `SHA256SUMS`）。
+本包没有发布到 npm registry，安装包由本仓库自己构建：
 
 ```bash
-# npm（registry 直达）
-dsh plugin --profile web add @q253595422/dsh-imagegen-video
-
-# 或 GitHub Release 资产
-dsh plugin --profile web add https://github.com/q253595422/dsh-imagegen-video/releases/download/v1.15.2/q253595422-dsh-imagegen-video-1.15.2.tgz
+git clone https://github.com/wcq5012531-crypto/dsh-imagegen-erkai.git
+cd dsh-imagegen-erkai
+npm install
+npm run build                     # 产出 lib/（宿主 index.js + 客户端 client.js）
+npm pack                          # 产出 dsh-imagegen-studio-<版本>.tgz
+dsh plugin --profile web add ./dsh-imagegen-studio-<版本>.tgz
 ```
 
-也可以先到 [Releases](https://github.com/q253595422/dsh-imagegen-video/releases) 页面下载 `.tgz`，再安装本地文件：
+`.tgz` 也能当成一个普通依赖手工装进 profile（DSH Desktop 的 profile 不允许 CLI 写，
+需要自己改文件）：
 
-```bash
-dsh plugin --profile web add ./q253595422-dsh-imagegen-video-1.15.2.tgz
+```jsonc
+// <DSH_HOME>/profiles/web/package.json
+{
+  "dependencies": { "dsh-imagegen-studio": "file:./dsh-imagegen-studio-1.16.8.tgz" },
+  "dsh": {
+    "profile": {
+      "bundles": ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app", "dsh-imagegen-studio"]
+    }
+  }
+}
 ```
 
-> ⚠️ **不要与 `@dickpy/dsh-imagegen-studio` 同时安装。** 两者注册的是同一套
-> `/api/dsh-imagegen-studio/*` 路由和同一个 UI 面板，同时启用会冲突。数据目录
-> `~/.dsh/dsh-imagegen-studio/` 也是两者共用的，切换前请先备份。详见 [授权与致谢](#license)。
+> ⚠️ **不要与 `@q253595422/dsh-imagegen-video` 或 `@dickpy/dsh-imagegen-studio` 同时启用。**
+> 三者注册的是同一套 `/api/dsh-imagegen-studio/*` 路由和同一个 UI 面板，同时启用会冲突
+> （表现是路由重复注册、工具重复注册，严重时整个页面卡在启动）。数据目录
+> `~/.dsh/dsh-imagegen-studio/` 是共用的，切换前请先备份。详见 [授权与致谢](#license)。
 
 安装后重启 `dsh web`，侧边栏会出现「生图」入口。到「设置 → 生图配置」添加提供方、填写 API 地址与密钥、检测并选择生图模型，保存后即可开始创作。Windows 若遇 PowerShell 脚本策略限制，请使用 `dsh.cmd`。
 
@@ -68,7 +80,7 @@ dsh plugin --profile web add ./q253595422-dsh-imagegen-video-1.15.2.tgz
 <summary><b>其他安装方式、升级与回滚</b></summary>
 
 - **让 Agent 安装：**把上面的安装命令发给 DSH、Codex 或其他 coding agent。
-- **指定版本：**把 URL 里的 `v1.15.2` 与文件名里的版本号换成目标版本，或从 [GitHub Releases](https://github.com/q253595422/dsh-imagegen-video/releases) 下载对应版本的 tgz 后安装。
+- **指定版本：**`npm pack` 出来的文件名自带版本号，装哪个 tgz 就是哪个版本；想要旧版本就检出对应 commit 再打包。
 - **升级：**重复执行 `add` 命令指向新版本即可；插件也会在面板中提示新版本。更新后重启 `dsh web`。
 - **DSH Desktop 用户：**宿主 CLI 不允许写入 `desktop` 这个 profile，所以面板不会假装去更新，而是直接给出可复制的命令和下载地址，由你自己执行——不会只甩一句「更新失败」而没有原因。
 - 渠道配置、历史记录和画廊数据保存在 DSH 宿主侧，正常升级不会清空。
@@ -298,7 +310,7 @@ dsh plugin --profile web add ./q253595422-dsh-imagegen-video-1.15.2.tgz
 </div>
 
 > 二维码 7 天内有效（2026 年 10 月 25 日前）。过期或人数已满时，请改到
-> [Issues](https://github.com/q253595422/dsh-imagegen-video/issues) 提问题，
+> [Issues](https://github.com/wcq5012531-crypto/dsh-imagegen-erkai/issues) 提问题，
 > 并提醒维护者换一张新码。安全敏感的问题不要发在群里，也不要贴 API 密钥。
 
 <a id="license"></a>
@@ -312,7 +324,7 @@ dsh plugin --profile web add ./q253595422-dsh-imagegen-video-1.15.2.tgz
 首尾帧 / 多参考图）、图片转可编辑 PPT（最多 12 张，每张一页）、无限画布（图片与视频节点、
 分镜节点、片段拼接、技能）、电商套图、模板库与画廊。
 
-**支持与问题反馈请提到本仓库的 Issues**（[Bug 报告](https://github.com/q253595422/dsh-imagegen-video/issues/new?template=bug_report.yml) · [功能建议](https://github.com/q253595422/dsh-imagegen-video/issues/new?template=feature_request.yml) · [全部 Issues](https://github.com/q253595422/dsh-imagegen-video/issues)）。
+**支持与问题反馈请提到本仓库的 Issues**（[全部 Issues](https://github.com/wcq5012531-crypto/dsh-imagegen-erkai/issues)）。
 
 **与 `@dickpy/dsh-imagegen-studio` 不能共存**：两者注册同一套 `/api/dsh-imagegen-studio/*` 路由与
 同一个 UI 面板，同时安装会冲突；数据目录 `~/.dsh/dsh-imagegen-studio/` 也是共用的。要换回
@@ -352,8 +364,8 @@ pnpm run upstream:adopt v1.8.3   # 记录「已整合到哪个版本」
 本地打包并安装到 DSH 验收：
 
 ```bash
-pnpm pack --pack-destination .
-dsh plugin --profile web add ./q253595422-dsh-imagegen-video-<版本>.tgz
+npm run build && npm pack
+dsh plugin --profile web add ./dsh-imagegen-studio-<版本>.tgz
 ```
 
 仓库里的离线套件不需要网络与付费 API 调用；需要浏览器或 `ffmpeg` 的检查在缺

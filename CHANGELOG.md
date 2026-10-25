@@ -20,6 +20,8 @@ Attribution for third-party code is in [NOTICE](./NOTICE).
 - **画布批量入库。** 素材库多选后右键一次就能把选中的全加到画布：`importRequest` 从单条改成 `items[]`，
   先全部解析（一条失效不会让整批卡在半路），并发导入，节点按用户选择的顺序落下。
 - 验证：`npx tsc --noEmit` 干净、`npm run build`、全部套件通过。
+- **文档。** README 改写为二开仓库自己的说明：包名、与上游的互斥关系，以及「`npm pack` 出 tgz 再
+  `dsh plugin add`」和「手工写 profile 依赖」两条安装路径。打包产物 `*.tgz` 不进仓库。
 
 ### 1.16.7 — 观察者不再盯着整页 DOM
 
