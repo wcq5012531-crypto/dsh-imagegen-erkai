@@ -31,6 +31,7 @@ import { sendToStudio } from './studio-bridge.ts'
 import { PptWorkspace } from './PptWorkspace.tsx'
 import { ModelPicker, resolveModelChoice, type ModelPickerValue } from './ModelPicker.tsx'
 import { DiagnosticsButton, DiagnosticsPanel } from './DiagnosticsPanel.tsx'
+import { RowMenu, useRowMenu, type RowMenuItem } from './RowMenu.tsx'
 import { GenerationLoading } from './GenerationLoading.tsx'
 import { useImageGenLanguageTick } from './use-language.ts'
 import type { EcommerceRefRole, GenerateMode, GenerateRequest, GeneratedImage, GenerationTask, GenerationTaskStatus, GenerationTaskSummary, HistoryEntry, HistoryImageRef, ProductSetDraft, ProductSetSlot, UpdateInfo, VideoHistoryEntry, VideoTaskSummary } from '../protocol.ts'
@@ -538,7 +539,7 @@ type PanelWorkspace = 'studio' | 'normal' | 'ecommerce' | 'canvas' | 'ppt'
  * clip would duplicate tens of megabytes per node.
  */
 type CanvasImportRequest =
-  | { source: 'history' | 'gallery'; entryId: string; imageIndex: number }
+  | { source: 'history' | 'gallery'; items: Array<{ entryId: string; imageIndex: number }> }
   | { source: 'video'; url: string; mime: string; duration?: number; title?: string }
 
 type ComparisonSession = { taskIds: string[]; prompt: string; comparisonId: string }
@@ -866,7 +867,17 @@ export function ImageGenPanel(props: {
     setWorkspace('studio')
   }
   const addEntryToCanvas = (source: 'history' | 'gallery', entryId: string, imageIndex = 0): void => {
-    setCanvasImportRequest({ source, entryId, imageIndex })
+    setCanvasImportRequest({ source, items: [{ entryId, imageIndex }] })
+    setWorkspace('canvas')
+  }
+  /**
+   * Bulk handoff: the selection travels as ONE request so the canvas imports it
+   * in a single pass. Firing `addEntryToCanvas` per id would leave only the last
+   * request alive — the state is a single slot, and the canvas consumes it once.
+   */
+  const addEntriesToCanvas = (source: 'history' | 'gallery', entryIds: string[]): void => {
+    if (entryIds.length === 0) return
+    setCanvasImportRequest({ source, items: entryIds.map(entryId => ({ entryId, imageIndex: 0 })) })
     setWorkspace('canvas')
   }
   const [prompt, setPrompt] = useState('')
@@ -2796,6 +2807,28 @@ export function ImageGenPanel(props: {
     closePreview()
   }
 
+  // Right-click menu state for the history rows and the gallery cards. The
+  // rows keep their hover icons; the menu is the same set of handlers with
+  // visible words, because `title` tooltips need a hover and a wait.
+  const [rowMenu, openRowMenu, closeRowMenu] = useRowMenu()
+
+  /**
+   * The history rows are portaled into the shell, outside the React root that
+   * owns this panel, and React's delegated `onContextMenu` never reaches them
+   * there (plain clicks do, because every row sits inside a button of its own).
+   * So the menu is driven by a real DOM listener: same items, same handler, no
+   * dependency on where the portal ends up.
+   */
+  const contextMenuFor = useCallback((items: RowMenuItem[]): ((node: HTMLDivElement | null) => void) => {
+    return (node: HTMLDivElement | null): void => {
+      if (node === null) return
+      node.oncontextmenu = (event: globalThis.MouseEvent): void => {
+        event.preventDefault()
+        openRowMenu({ x: event.clientX, y: event.clientY }, items)
+      }
+    }
+  }, [openRowMenu])
+
   // Render history into the shell sidebar so it remains a separate navigation
   // surface from both the image workspace and the native conversation.
   const historyPanel = (
@@ -2907,7 +2940,16 @@ export function ImageGenPanel(props: {
             {groupHistoryEntries(archivedHistory).map(group => {
               const head = group.entries[0]!
               return (
-                <div key={group.key} className={css.historyItem} data-kind="image">
+                <div
+                  key={group.key}
+                  className={css.historyItem}
+                  data-kind="image"
+                  ref={contextMenuFor([
+                    { key: 'open', label: tt('menu.open'), run: () => { void viewHistoryGroup(group) } },
+                    { key: 'unarchive', label: tt('history.unarchive'), disabled: historyArchivingId !== null, run: () => { void unarchiveHistory(head) } },
+                    { key: 'delete', label: tt('history.delete'), danger: true, run: () => { void deleteHistoryGroup(group) } },
+                  ])}
+                >
                   <button type="button" className={css.historyMain} onClick={() => { void viewHistoryGroup(group) }}>
                     {head.images[0] === undefined
                       ? <span className={css.historyThumbPlaceholder} />
@@ -2969,6 +3011,22 @@ export function ImageGenPanel(props: {
                 data-active={isActive ? '' : undefined}
                 data-kind={row.kind}
                 data-video-row={isVideoRow ? '' : undefined}
+                ref={contextMenuFor(isVideoRow
+                  ? [
+                      { key: 'open', label: tt('menu.open'), run: () => { openVideoFromHistory(row.entry!) } },
+                      { key: 'conversation', label: tt('conversation.add'), run: () => { void addClipToConversation(row.entry!.videos[0]!.url, `history-clip:${row.entry!.id}`) } },
+                      { key: 'canvas', label: tt('canvas.addToCanvas'), run: () => { addClipToCanvas(row.entry!.videos[0]!.url, row.entry!.videos[0]!.mime, row.entry!.videos[0]!.duration, row.entry!.prompt) } },
+                      { key: 'gallery', label: tt('gallery.add'), run: () => { void favoriteVideoEntry(row.entry!) } },
+                      { key: 'delete', label: tt('history.delete'), danger: true, run: () => { void deleteVideoHistoryEntry(row.entry!.id) } },
+                    ]
+                  : [
+                      { key: 'open', label: tt('menu.open'), run: () => { void viewHistoryGroup(row.group!) } },
+                      { key: 'conversation', label: tt('conversation.add'), disabled: conversationBusy, run: () => { void addHistoryEntryToConversation(row.group!.entries[0]!) } },
+                      { key: 'gallery', label: tt('gallery.add'), disabled: galleryAdding, run: () => { void addHistoryEntryToGallery(row.group!.entries[0]!) } },
+                      { key: 'canvas', label: tt('canvas.addToCanvas'), run: () => { addEntryToCanvas('history', row.group!.entries[0]!.id, 0) } },
+                      { key: 'archive', label: tt('history.archive'), disabled: historyArchivingId !== null, run: () => { void archiveHistoryGroup(row.group!) } },
+                      { key: 'delete', label: tt('history.delete'), danger: true, run: () => { void deleteHistoryGroup(row.group!) } },
+                    ])}
                 data-comparison={!isVideoRow && row.group!.models.length > 1 ? '' : undefined}
               >
                 <button
@@ -3949,6 +4007,23 @@ export function ImageGenPanel(props: {
                   <input className={css.galleryTagInput} value={galleryTagInput} onChange={event => { setGalleryTagInput(event.target.value) }} placeholder={tt('gallery.tagsPlaceholder')} aria-label={tt('gallery.tagsPlaceholder')} />
                   <button type="button" className={css.galleryBulkButton} disabled={galleryTagInput.trim() === ''} onClick={() => { void applyGalleryTags() }}>{tt('gallery.tagsApply')}</button>
                   <button type="button" className={css.galleryBulkButton} onClick={downloadGalleryImages}>{tt('gallery.downloadSelected')}</button>
+                  <button
+                    type="button"
+                    className={css.galleryBulkButton}
+                    data-gallery-bulk-canvas=""
+                    disabled={gallery.filter(entry => selectedGalleryIds.has(entry.id) && entry.video === undefined).length === 0}
+                    onClick={() => {
+                      // A clip is imported by reference through its own path
+                      // (`addClipToCanvas`), so the bulk handoff covers images
+                      // only — importing `entry.id` for a clip would ask the host
+                      // to copy an image that does not exist.
+                      addEntriesToCanvas('gallery', gallery
+                        .filter(entry => selectedGalleryIds.has(entry.id) && entry.video === undefined)
+                        .map(entry => entry.id))
+                    }}
+                  >
+                    {tt('canvas.addToCanvas')}
+                  </button>
                   <button type="button" className={css.galleryBulkButton} onClick={exportGalleryJson}>{tt('gallery.exportJson')}</button>
                   <button type="button" className={css.gallerySelectionClear} onClick={clearGallerySelection}>{tt('gallery.selectionClear')}</button>
                 </section>
@@ -4016,7 +4091,26 @@ export function ImageGenPanel(props: {
                     if (image === undefined && clip === undefined) return null
                     const isClip = clip !== undefined
                     return (
-                      <article key={entry.id} className={css.galleryCard} data-clip={isClip ? '' : undefined} data-selected={selectedGalleryIds.has(entry.id) ? '' : undefined}>
+                      <article
+                        key={entry.id}
+                        className={css.galleryCard}
+                        data-clip={isClip ? '' : undefined}
+                        data-selected={selectedGalleryIds.has(entry.id) ? '' : undefined}
+                        ref={contextMenuFor(isClip
+                          ? [
+                              { key: 'open', label: tt('menu.open'), run: () => { openGalleryClip(entry) } },
+                              { key: 'conversation', label: tt('conversation.add'), disabled: addingToConversation !== null, run: () => { void addClipToConversation(clip.url, `gallery-clip:${entry.id}`) } },
+                              { key: 'canvas', label: tt('canvas.addToCanvas'), run: () => { addClipToCanvas(clip.url, clip.mime, clip.duration, entry.prompt) } },
+                              { key: 'delete', label: tt('gallery.delete'), danger: true, run: () => { void deleteGalleryEntry(entry.id) } },
+                            ]
+                          : [
+                              { key: 'open', label: tt('menu.open'), run: () => { void viewGalleryEntry(entry) } },
+                              { key: 'conversation', label: tt('conversation.add'), disabled: conversationBusy, run: () => { void addGalleryEntryToConversation(entry) } },
+                              { key: 'canvas', label: tt('canvas.addToCanvas'), run: () => { addEntryToCanvas('gallery', entry.id, 0) } },
+                              { key: 'tags', label: tt('gallery.editTags'), run: () => { startEditingGalleryTags(entry) } },
+                              { key: 'delete', label: tt('gallery.delete'), danger: true, run: () => { void deleteGalleryEntry(entry.id) } },
+                            ])}
+                      >
                         <label className={css.gallerySelect} title={tt('gallery.select')}>
                           <input type="checkbox" checked={selectedGalleryIds.has(entry.id)} onChange={() => { setGallerySelecting(true); toggleGallerySelection(entry.id) }} />
                         </label>
@@ -4608,6 +4702,7 @@ export function ImageGenPanel(props: {
       <div className={css.studioHost} data-studio-root="">
         <StudioWorkspace active={active && workspace === 'studio'} />
       </div>
+      <RowMenu state={rowMenu} onClose={closeRowMenu} />
     </div>
   )
 }

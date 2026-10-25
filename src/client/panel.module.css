@@ -4178,3 +4178,39 @@ a.galleryCardAction {
 .panel[data-workspace='studio'] > .studioHost {
   display: flex;
 }
+
+/* Right-click menu shared by the history rows and the gallery cards. It is a
+   fixed-position portal, so the coordinates come from the pointer: what matters
+   is that it clears the panel header and the unread badge, which is why it uses
+   the context-menu step of the z scale rather than a local number. */
+.rowMenu {
+  position: fixed;
+  z-index: var(--z-context-menu);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 168px;
+  padding: 4px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 9px;
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 32%);
+}
+
+.rowMenuItem {
+  display: block;
+  width: 100%;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--dsw-alias-label-primary);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rowMenuItem:hover:not(:disabled) { background: var(--dsw-alias-bg-layer-2); }
+.rowMenuItem[data-danger] { color: var(--dsw-alias-state-error); }
+.rowMenuItem:disabled { color: var(--dsw-alias-label-tertiary); cursor: default; }

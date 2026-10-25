@@ -6008,6 +6008,33 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     assert.ok(imageRow.querySelector('[data-history-add-canvas]') !== null, 'image rows keep add-to-canvas')
     assert.equal(imageRow.querySelector('[data-history-video-gallery]') === null, true, 'image rows have no clip gallery action')
 
+    // Right-click is the discoverable copy of those hover icons: the same
+    // handlers behind visible words. The menu is a portal, so it lives under
+    // document.body rather than inside the row that opened it.
+    // The menu is opened from a DOM listener, so the state lands on the next
+    // macrotask: wait for the portal node instead of querying synchronously.
+    const openRowMenu = async row => {
+      row.dispatchEvent(new jsdomWindow.MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+      await waitUntil(() => jsdomDocument.querySelector('[data-row-menu]') !== null, 'the row menu opens on right-click')
+      return jsdomDocument.querySelector('[data-row-menu]')
+    }
+    const menuKeys = menu => [...menu.querySelectorAll('[data-menu-key]')].map(el => el.getAttribute('data-menu-key'))
+    const imageMenu = await openRowMenu(imageRow)
+    assert.ok(imageMenu !== null, 'right-clicking an image row opens the row menu')
+    assert.deepEqual(menuKeys(imageMenu), ['open', 'conversation', 'gallery', 'canvas', 'archive', 'delete'], 'the image menu offers the row actions in field order')
+    assert.ok(
+      [...imageMenu.querySelectorAll('[data-menu-key]')].every(button => (button.textContent ?? '').trim() !== ''),
+      'every menu item carries a visible label',
+    )
+    assert.ok(imageMenu.querySelector('[data-menu-key="delete"]').hasAttribute('data-danger'), 'delete is marked as destructive')
+    jsdomDocument.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await waitUntil(() => jsdomDocument.querySelector('[data-row-menu]') === null, 'Escape closes the row menu')
+    // A clip row offers its own set: no archive (clips are not archived).
+    const clipMenu = await openRowMenu(clipRow)
+    assert.ok(clipMenu !== null, 'right-clicking a clip row opens the row menu')
+    assert.deepEqual(menuKeys(clipMenu), ['open', 'conversation', 'canvas', 'gallery', 'delete'], 'the clip menu lists clip actions only')
+    jsdomDocument.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+
     // Deleting a clip removes only that row, from the clip store.
     const clipDelete = clipRow.querySelector('.historyIconAction[data-danger], [data-danger]')
     assert.ok(clipDelete !== null, 'the clip row offers a delete action')

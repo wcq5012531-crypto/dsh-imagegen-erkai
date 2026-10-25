@@ -179,7 +179,7 @@ interface CanvasWorkspaceProps {
    * generated-clip nodes follow.
    */
   importRequest?: (
-    | { source: 'history' | 'gallery'; entryId: string; imageIndex: number }
+    | { source: 'history' | 'gallery'; items: Array<{ entryId: string; imageIndex: number }> }
     | { source: 'video'; url: string; mime: string; duration?: number; title?: string }
   )
   onImportRequestHandled?: () => void
@@ -4466,21 +4466,29 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
       onImportRequestHandled?.()
       return
     }
-    const requestKey = `${importRequest.source}:${importRequest.entryId}:${importRequest.imageIndex}`
+    const requestKey = `${importRequest.source}:${importRequest.items.map(item => `${item.entryId}#${item.imageIndex}`).join(',')}`
     if (processedImport.current === requestKey) return
     const sourceEntries = importRequest.source === 'history' ? history : gallery
-    const entry = sourceEntries.find(item => item.id === importRequest.entryId)
-    const image = entry?.images[importRequest.imageIndex]
-    if (entry === undefined || image === undefined) {
-      processedImport.current = requestKey
+    // Resolve every id BEFORE importing so one missing entry cannot leave the
+    // batch half-applied and then re-run on the next render.
+    const resolved = importRequest.items.flatMap(item => {
+      const entry = sourceEntries.find(candidate => candidate.id === item.entryId)
+      const image = entry?.images[item.imageIndex]
+      return entry === undefined || image === undefined ? [] : [{ entryId: item.entryId, imageIndex: item.imageIndex, image }]
+    })
+    processedImport.current = requestKey
+    if (resolved.length === 0) {
       onImportRequestHandled?.()
       return
     }
-    processedImport.current = requestKey
     void (async () => {
-      const dimensions = await readImageSize(image.url)
-      const asset = await api.canvasImport(importRequest.source, importRequest.entryId, importRequest.imageIndex, dimensions.width, dimensions.height)
-      addAssets([asset])
+      // Import concurrently but add in request order: `addAssets` lays nodes out
+      // in the order it receives them, and the user selected them in that order.
+      const assets = await Promise.all(resolved.map(async item => {
+        const dimensions = await readImageSize(item.image.url)
+        return api.canvasImport(importRequest.source, item.entryId, item.imageIndex, dimensions.width, dimensions.height)
+      }))
+      addAssets(assets)
       onImportRequestHandled?.()
     })().catch(caught => {
       setError(caught instanceof Error ? caught.message : String(caught))

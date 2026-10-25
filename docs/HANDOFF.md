@@ -332,3 +332,27 @@
 
 验证：`npm run build`（`lib/client.js` 2,734,732 B）、`node scripts/smoke.mjs` 89/89，
 九个套件全绿，已同步到 `profiles\web\vendor\dsh-imagegen-studio`。
+
+## 16. 右键菜单 + 批量入库（1.16.8）
+
+用户 m03295「继续」指向三件打通：素材库卡片右键、历史行右键、画布多选批量入库。
+
+1. **`src/client/RowMenu.tsx`（新）**：`useRowMenu()` → `[state, open, close]`；`open` 既接受 React 事件，
+   也接受 `{ x, y }`（原生监听和「⋯」类入口都用得上）。`RowMenu` 用 `createPortal` 渲染到
+   `document.body`，位置在视口内收边（`MENU_WIDTH = 168`、`ITEM_HEIGHT = 30`），Esc / 外部
+   `mousedown`（capture）/ 滚动（capture）/ `resize` / `blur` 关闭。按钮带 `data-menu-key`，
+   危险项带 `data-danger`。
+2. **历史行**（`src/client/ImageGenPanel.tsx`）：图片行 打开 / 加入对话 / 加入素材库 / 加到画布 / 归档 / 删除；
+   视频行 打开 / 加入对话 / 加到画布 / 加入素材库 / 删除；已归档行 打开 / 取消归档 / 删除。
+3. **为什么是原生监听**：历史行 portal 进宿主侧栏，React 的委托 `onContextMenu` 到不了那个子树
+   （点击可用是因为每行自带按钮）。`contextMenuFor(items)` 返回 ref 回调，在节点上挂 `node.oncontextmenu`。
+   冒烟因此改成 `await waitUntil(() => document.querySelector('[data-row-menu]') !== null)`。
+4. **素材库卡片**（`:4099`）：图片卡片 打开 / 加入对话 / 加到画布 / 编辑分类 / 删除；视频卡片 打开 / 加入对话 /
+   加到画布 / 删除。
+5. **批量入库**（`src/client/CanvasWorkspace.tsx`）：`importRequest` 的
+   `{ entryId, imageIndex }` 变成 `items: Array<{ entryId, imageIndex }>`；先全部解析再并发
+   `canvasImport`，`addAssets` 按选择顺序落节点；`processedImport` 的 key 用全部条目拼。
+
+验证：`npx tsc --noEmit` 干净；`npm run build`（`lib/client.js` 见构建输出）；`node scripts/smoke.mjs`
+89/89；全量 19 个套件通过。
+
