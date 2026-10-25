@@ -380,4 +380,23 @@
 验证：`node scripts/smoke.mjs` 全绿（`A1b` 新断言通过）；`npx tsc --noEmit` 干净；
 vendor 副本已同步 1.16.9（`lib/index.js` 内可搜到「冲突插件」提示）。
 
+## 18. 宿主依赖不再写成 peer（1.16.10）
 
+用户截图报「依赖缺失 @deepseek-ai/schemastery ≥3.18.4 … 未安装」。排查结论：报错来自 profile 里的
+`dsh-my-guardian`（0.4.8）`lib/dep-precheck.js`，不是 DSH 本体，也不是插件真的缺包。
+
+1. **它为什么看不见宿主包**：`lib/host-inventory.js` 只认 `<Resources>/app.asar/dsh/desktop-runtime.json`
+   （以及 `DSH_APP_RESOURCES` 的同一约定）。本机 DSH Desktop 0.12.1 的 `app.asar` 顶层是 `node_modules/`、
+   `out/`，没有 `dsh/desktop-runtime.json`，于是宿主清单解析成空，随后 `classifyPeers` 把
+   `peerDependencies` 里所有包都算成 `missing`。
+2. **我们其实由宿主供**：`<Resources>/host-module-fallback.mjs` 的 `registerHostModuleFallback()` 对任何
+   `@deepseek-ai/*` 解析失败都会回落到 Harness 入口（`ERR_MODULE_NOT_FOUND` 才回落），所以 Profile 里
+   永远不该装一份 `@deepseek-ai/schemastery`——装了反而会和宿主抢同一个单例。
+3. **处理**：从 `package.json` 的 `peerDependencies` 移除该包（运行时 `import` 不变，解析走宿主兜底），
+   并在 README「其他安装方式」里写清原因。现在 `checkPeerDependencies()` 对 vendor 副本返回
+   `{ ok: true, missing: [], mismatched: [], warnings: [] }`，市场面板的「依赖缺失」随之消失。
+4. **备选**（如果以后想保留声明）：`peerDependenciesMeta.<name>.optional = true` 能把 `missing` 变成
+   `warnings`（`ok: true`），但面板仍可能显示一行「可选依赖…未安装」。
+
+验证：`npm run build` + `node scripts/verify-lib-sync.mjs` PASS；`node scripts/smoke.mjs` 全绿；
+vendor 副本已同步 1.16.10。
