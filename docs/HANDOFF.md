@@ -356,3 +356,28 @@
 验证：`npx tsc --noEmit` 干净；`npm run build`（`lib/client.js` 见构建输出）；`node scripts/smoke.mjs`
 89/89；全量 19 个套件通过。
 
+## 17. 安装对齐市场 + 同源撞车检测（1.16.9）
+
+用户 m03841 的两条要求：装法要对齐市场（包名 / GitHub 地址 / 本地目录），并在我这个插件装上来时
+主动识别同源插件（`@q253595422/dsh-imagegen-video`、`@dickpy/dsh-imagegen-studio`）而不是让两边抢路由。
+
+1. **为什么之前 GitHub 地址装不上**：仓库不带构建产物，pnpm 拉 git 包时会跑 `prepare`（`tsdown`），
+   而 pnpm 对 git 包的构建脚本是 fail-closed 的（`ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`），
+   允许清单还要按 commit sha 写进 `pnpm-workspace.yaml`，每次 push 都会失效。
+   解法：把 `lib/` 提交进仓库、删掉 `prepare`。`scripts/verify-lib-sync.mjs` 钉住「提交的 lib/ 与
+   源码构建结果一致」，`npm test` 里排在 build 之后。
+2. **实测**（全新 `DSH_HOME`，不碰用户 profile）：
+   - `dsh plugin --profile web add https://github.com/wcq5012531-crypto/dsh-imagegen-erkai`
+     → 33.6s，`dependencies` 记成 `github:wcq5012531-crypto/dsh-imagegen-erkai`，bundles 自动加一行，
+     `lib/index.js` 就在包里，无需编译。
+   - `dsh plugin --profile web add C:\...\dsh-imagegen-studio` → 1.9s，`link:` 依赖，同一套校验通过。
+   - 包名（`dsh-imagegen-studio`）还需要发 npm registry，仓库里没做，需要 token。
+3. **撞车检测**（`src/conflicts.ts`，在 `apply()` 最前面调用）：扫 profile 依赖 + `cordis.patch.yml`
+   的启用行（`disabled: true` 的算禁用），命中就抛中文错误，说明卸载/禁用命令，并提示数据目录共用、
+   换之前先备份。命中条件是「装了 + 启用」，纯依赖挂着但被 patch 禁用不误报。
+4. 冒烟 `A1b` 从「prepare 钩子会构建产物」改成「git 安装不需要构建：lib/ 随仓库发布」。
+
+验证：`node scripts/smoke.mjs` 全绿（`A1b` 新断言通过）；`npx tsc --noEmit` 干净；
+vendor 副本已同步 1.16.9（`lib/index.js` 内可搜到「冲突插件」提示）。
+
+
