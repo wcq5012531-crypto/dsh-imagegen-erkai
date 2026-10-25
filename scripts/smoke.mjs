@@ -5619,18 +5619,19 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     assert.ok(imageCard !== undefined, 'the image card still renders')
     assert.ok(imageCard.querySelector('[data-gallery-add-conversation]') !== null, 'the image card keeps add-to-conversation')
 
-    // The 视频 filter bucket selects exactly the clips and its badge agrees.
-    // Match BUTTONS: the `galleryFilters` CONTAINER also carries a matching class
-    // and swallowing the click there would silently apply no filter at all.
-    const videoChip = [...view.querySelectorAll('button[class*="galleryFilter"]')].find(chip => chip.textContent?.includes('视频'))
-    assert.ok(videoChip !== undefined, 'the gallery offers a video filter bucket')
-    videoChip.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true, cancelable: true }))
-    await new Promise(resolve => setTimeout(resolve, 40))
-    assert.ok(view.querySelector('article[data-clip]') !== null, 'the video filter keeps the clip')
-    // Avoid `:not()` here: jsdom evaluates it across the whole subtree, which is
-    // slow and memory-hungry on this fixture. Counting the cards directly is
-    // both cheaper and more precise.
-    assert.equal([...view.querySelectorAll('article')].filter(card => card.getAttribute('data-clip') === null).length, 0, 'the video filter hides image cards')
+    // 货架不再分「来源」：图片和剪贴落在同一条货架上，第一行是「全部素材」，
+    // 之后每个用户分类各占一行。这里断言新形状本身，而不是已退休的 视频 来源桶。
+    const allRow = view.querySelector('[data-gallery-all]')
+    assert.ok(allRow !== null, 'the shelf offers the 全部素材 row')
+    assert.equal(allRow.getAttribute('data-active'), '', 'the 全部素材 row is the active one')
+    assert.ok(allRow.textContent?.includes('全部素材'), 'the 全部素材 row is labelled')
+    assert.ok(view.querySelector('article[data-clip]') !== null, 'the clip is listed under 全部素材')
+    // Avoid `:not()`: jsdom evaluates it across the whole subtree, which is slow
+    // and memory-hungry on this fixture. Counting the cards directly is cheaper.
+    assert.ok(
+      [...view.querySelectorAll('article')].some(card => card.getAttribute('data-clip') === null),
+      'image cards are listed under 全部素材 alongside clips',
+    )
 
     // Re-query both the card and the button: the filter chips re-render the
     // list, so anything captured before them is detached and its clicks are

@@ -536,7 +536,6 @@ type CanvasImportRequest =
   | { source: 'history' | 'gallery'; entryId: string; imageIndex: number }
   | { source: 'video'; url: string; mime: string; duration?: number; title?: string }
 
-type GalleryFilter = string
 type ComparisonSession = { taskIds: string[]; prompt: string; comparisonId: string }
 type HistoryGroup = { key: string; entries: HistoryEntry[]; models: string[] }
 
@@ -920,7 +919,10 @@ export function ImageGenPanel(props: {
   const [galleryViewingId, setGalleryViewingId] = useState<string | null>(null)
   const [galleryAdding, setGalleryAdding] = useState(false)
   const [galleryMessage, setGalleryMessage] = useState<string | null>(null)
-  const [galleryFilter, setGalleryFilter] = useState<GalleryFilter>('all')
+  /** The model chip selection; `all` means "no model filter". Categories are a
+   *  separate axis (galleryTagFilter) because the user reads them as the shelf
+   *  organisation, not as a source bucket. */
+  const [galleryModel, setGalleryModel] = useState('all')
   /** The category registry as the host persists it (tags that earned a name). */
   const [galleryCategories, setGalleryCategories] = useState<string[]>([])
   const [categoryManagerOpen, setCategoryManagerOpen] = useState(false)
@@ -1147,16 +1149,12 @@ export function ImageGenPanel(props: {
   }, [modelPreferenceKey])
 
   const filteredGallery = gallery
-    .filter(entry => {
-      if (galleryFilter === 'all') return true
-      // Clips are their own category: without this they would land in the
-      // 'text' bucket (their mode is 'video', which matches neither text nor
-      // edit), so the text filter would appear to lose them.
-      if (galleryFilter === 'video') return entry.video !== undefined
-      if (galleryFilter === 'text') return entry.video === undefined && entry.mode === 'text'
-      if (galleryFilter === 'edit') return entry.video === undefined && entry.mode === 'edit'
-      return entry.model === galleryFilter
-    })
+    // There is no "source" axis any more: 全部素材 / 文生图 / 图生图 / 视频 were
+    // never categories the user asked for, and listing them under a 分类 heading
+    // next to real categories made the shelf read like two different things.
+    // A model chip stays available because "which engine made this" is a real
+    // question once several models share one shelf.
+    .filter(entry => galleryModel === 'all' || entry.model === galleryModel)
     // A clip stores its aspect ratio in `size`; normalizeSize would fold '16:9'
     // through the legacy-image map and could mis-bucket it, so compare the raw
     // value first and fall back to the normalized image vocabulary.
@@ -1296,6 +1294,18 @@ export function ImageGenPanel(props: {
     initialDataRequestedRef.current = true
     loadInitialData()
   }, [active, loadInitialData])
+
+  useEffect(() => {
+    // 画布右键「加入素材库」、工作室自动入库都会广播这一条：素材库只有一份，
+    // 哪个面写入都该让正开着的列表立刻跟上。
+    const refresh = (): void => {
+      api.galleryList()
+        .then(result => { setGallery(result.entries); setGalleryTrash(result.trash); setGalleryCategories(result.categories) })
+        .catch(caught => { setGalleryLoadError(errorMessage(caught)) })
+    }
+    window.addEventListener('dsh-imagegen-studio:gallery-changed', refresh)
+    return () => { window.removeEventListener('dsh-imagegen-studio:gallery-changed', refresh) }
+  }, [api])
 
   /** Retry after a failed first load: un-claim the one-shot read, then re-run it. */
   const retryInitialData = (): void => {
@@ -3240,53 +3250,6 @@ export function ImageGenPanel(props: {
           </div>
           {isGallery ? (
             <div className={css.galleryFilters}>
-              <div className={css.galleryFilterHeading}>{tt('gallery.sources')}</div>
-              {([
-                ['all', tt('gallery.all')],
-                ['text', tt('mode.text')],
-                ['edit', tt('mode.edit')],
-                // Clips are a category of their own, not an image mode.
-                ...gallery.some(entry => entry.video !== undefined) ? [['video', tt('history.video')] as const] : [],
-              ] as const).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={css.galleryFilter}
-                  data-active={galleryFilter === value ? '' : undefined}
-                  aria-pressed={galleryFilter === value}
-                  onClick={() => { setGalleryFilter(value) }}
-                >
-                  <span>{label}</span>
-                  <span className={css.galleryFilterCount}>{gallery.filter(entry => {
-                    // Must mirror the filteredGallery rule, or a chip's badge
-                    // would disagree with the list it produces.
-                    if (value === 'all') return true
-                    if (value === 'video') return entry.video !== undefined
-                    if (value === 'text') return entry.video === undefined && entry.mode === 'text'
-                    return entry.video === undefined && entry.mode === 'edit'
-                  }).length}</span>
-                </button>
-              ))}
-              {galleryModels.length > 1 ? (
-                <>
-                  <div className={css.galleryFilterDivider} />
-                  <div className={css.galleryFilterHeading}>{tt('gallery.models')}</div>
-                  {galleryModels.map(model => (
-                    <button
-                      key={model}
-                      type="button"
-                      className={css.galleryFilter}
-                      data-active={galleryFilter === model ? '' : undefined}
-                      aria-pressed={galleryFilter === model}
-                      onClick={() => { setGalleryFilter(model) }}
-                    >
-                      <span>{model}</span>
-                      <span className={css.galleryFilterCount}>{gallery.filter(entry => entry.model === model).length}</span>
-                    </button>
-                  ))}
-                </>
-              ) : null}
-              <div className={css.galleryFilterDivider} />
               <div className={css.galleryHeadingRow}>
                 <div className={css.galleryFilterHeading}>{tt('gallery.categories')}</div>
                 <button
@@ -3354,21 +3317,52 @@ export function ImageGenPanel(props: {
                   {categoryError !== null ? <div className={css.categoryError} role="alert">{categoryError}</div> : null}
                 </div>
               ) : null}
-              {galleryCategoryOptions.length > 0 ? (
-                <div className={css.galleryTagFilterList} style={{ marginTop: 10 }}>
-                  {galleryCategoryOptions.map(tag => (
-                    <button key={tag} type="button" className={css.galleryTagFilter} data-active={galleryTagFilter === tag ? '' : undefined} aria-pressed={galleryTagFilter === tag} onClick={() => { setGalleryTagFilter(previous => previous === tag ? null : tag) }}>
-                      <span>{tag}</span>
-                      <span>{gallery.filter(entry => (entry.tags ?? []).includes(tag)).length}</span>
+              {/* 分类就是货架本身：全部素材排第一行，之后每个分类各占一行——和原来
+                  「来源」那一列同样的形状，只是内容换成了用户自己建的东西。 */}
+              <button
+                type="button"
+                className={css.galleryFilter}
+                data-gallery-all=""
+                data-active={galleryTagFilter === null ? '' : undefined}
+                aria-pressed={galleryTagFilter === null}
+                onClick={() => { setGalleryTagFilter(null) }}
+              >
+                <span>{tt('gallery.all')}</span>
+                <span className={css.galleryFilterCount}>{gallery.length}</span>
+              </button>
+              {galleryCategoryOptions.map(tag => (
+                <button
+                  key={tag}
+                  type="button"
+                  className={css.galleryFilter}
+                  data-active={galleryTagFilter === tag ? '' : undefined}
+                  aria-pressed={galleryTagFilter === tag}
+                  onClick={() => { setGalleryTagFilter(previous => previous === tag ? null : tag) }}
+                >
+                  <span>{tag}</span>
+                  <span className={css.galleryFilterCount}>{gallery.filter(entry => (entry.tags ?? []).includes(tag)).length}</span>
+                </button>
+              ))}
+              {galleryModels.length > 1 ? (
+                <>
+                  <div className={css.galleryFilterDivider} />
+                  <div className={css.galleryFilterHeading}>{tt('gallery.models')}</div>
+                  {galleryModels.map(model => (
+                    <button
+                      key={model}
+                      type="button"
+                      className={css.galleryFilter}
+                      data-active={galleryModel === model ? '' : undefined}
+                      aria-pressed={galleryModel === model}
+                      onClick={() => { setGalleryModel(previous => previous === model ? 'all' : model) }}
+                    >
+                      <span>{model}</span>
+                      <span className={css.galleryFilterCount}>{gallery.filter(entry => entry.model === model).length}</span>
                     </button>
                   ))}
-                </div>
+                </>
               ) : null}
-              {galleryCategoryOptions.length === 0 && !categoryManagerOpen ? (
-                // The heading above now only lists real categories, so an empty
-                // list needs its own sentence instead of a silent gap.
-                <div className={css.galleryFilterNote}>{tt('gallery.categoryEmpty')}</div>
-              ) : null}
+
               {galleryRatioOptions.length > 1 ? (
                 <>
                   <div className={css.galleryFilterDivider} />
@@ -4002,7 +3996,7 @@ export function ImageGenPanel(props: {
                       className={css.galleryBulkButton}
                       data-gallery-clear-filters=""
                       style={{ marginLeft: 8 }}
-                      onClick={() => { setGalleryQuery(''); setGalleryFilter('all'); setGalleryRatio('all'); setGalleryTagFilter(null) }}
+                      onClick={() => { setGalleryQuery(''); setGalleryModel('all'); setGalleryRatio('all'); setGalleryTagFilter(null) }}
                     >{tt('gallery.clearFilters')}</button>
                   </div>
                 )

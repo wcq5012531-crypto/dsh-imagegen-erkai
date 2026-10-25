@@ -684,6 +684,7 @@ export function StudioWorkspace({ active }: StudioWorkspaceProps): React.ReactEl
       n: 1,
       images: [{ b64, mime: image.mime }],
     })
+    if (result.added) window.dispatchEvent(new CustomEvent('dsh-imagegen-studio:gallery-changed'))
     return result.added
   }, [libraryApi])
 

@@ -40,6 +40,21 @@ import { CanvasVideoPicker } from './CanvasVideoPicker.tsx'
 import { onTablistKeyDown, tabIndexFor } from './tablist.ts'
 import css from './canvas-workspace.module.css'
 
+/** Base64 payload of one blob, without the `data:` prefix: the shape the
+ *  gallery route accepts. Same conversion the studio uses when it auto-saves. */
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const text = typeof reader.result === 'string' ? reader.result : ''
+      const comma = text.indexOf(',')
+      resolve(comma >= 0 ? text.slice(comma + 1) : '')
+    }
+    reader.onerror = () => { reject(new Error('读取画布图片失败')) }
+    reader.readAsDataURL(blob)
+  })
+}
+
 type CanvasTool = 'select' | 'pan'
 
 /** The image picker's tab order, in one place: the render maps it, the arrows index it. */
@@ -2281,6 +2296,34 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
     link.rel = 'noopener'
     link.click()
   }, [])
+
+  /** 画布上的这一张直接进素材库。宿主按内容去重，所以按钮点两次也只多一条；
+   *  成功后广播一次，让正开着素材库的面板重新列一遍，而不是等用户手动刷新。 */
+  const saveNodeToLibrary = useCallback(async (node: CanvasNode): Promise<void> => {
+    const asset = assetOf(node)
+    if (asset === undefined || asset.url === '') return
+    try {
+      const response = await fetch(asset.url)
+      if (!response.ok) throw new Error(`HTTP ${String(response.status)}`)
+      const blob = await response.blob()
+      const result = await api.galleryAppend({
+        id: '',
+        createdAt: Date.now(),
+        mode: 'text',
+        model: tt('canvas.library.model'),
+        prompt: node.title === '' ? tt('canvas.library.untitled') : node.title,
+        size: 'auto',
+        quality: 'auto',
+        detail: '',
+        n: 1,
+        images: [{ b64: await blobToBase64(blob), mime: blob.type === '' ? 'image/png' : blob.type }],
+      })
+      setNotice(result.added ? tt('canvas.library.added') : tt('canvas.library.already'))
+      if (result.added) window.dispatchEvent(new CustomEvent('dsh-imagegen-studio:gallery-changed'))
+    } catch (caught) {
+      setNotice(errorMessage(caught))
+    }
+  }, [api])
 
   const upstreamNodes = useCallback((canvasDocument: CanvasDocument, nodeId: string): CanvasNode[] => {
     const byId = new Map(canvasDocument.nodes.map(node => [node.id, node]))
@@ -6156,6 +6199,8 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
           items.push({ label: tt('canvas.preview.expand'), icon: 'expand', action: () => openImageNode(node) })
           items.push({ label: tt('poster.title'), icon: 'text', action: () => { if (document !== null) setPosterTarget({ canvasId: document.id, nodeId: node.id }) } })
           items.push({ label: tt('canvas.download'), icon: 'download', action: () => downloadNode(node) })
+          // 生成物 → 素材库：同一个右键菜单里就能把这一张收进库，不用先下载再上传。
+          items.push({ label: tt('canvas.saveToLibrary'), icon: 'favorite', action: () => { void saveNodeToLibrary(node) } })
           // 反向打通：画布上这一张直接成为「普通生图」的参考素材。
           if (onSendToStudio !== undefined) {
             items.push({

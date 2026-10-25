@@ -264,3 +264,34 @@
 九个套件全绿；`lib/index.js` 862.89 kB、`lib/client.js` 2,732,016 B；已同步到
 `profiles\web\vendor\dsh-imagegen-studio`，**彻底退出 DSH Desktop 再重开**才生效。
 
+## 14. 单条货架 + 画布 → 素材库（1.16.6）
+
+用户原话（2026-10-25）：「这个分类还是不好，'来源'就应该和分类是一个意思，你去掉'来源'整个逻辑，
+把分类里每个分类像'来源'似的独占一行，且有一个'全部素材'。另外，素材也应和其他页面打通，比如，
+生成的内容，右键可以添加为素材，这只是个简单例子，打通和统一，是一个插件各个功能这能能完美融合
+的根基」。
+
+1. **删掉「来源」轴**（`src/client/ImageGenPanel.tsx`）：`GalleryFilter` 类型、`galleryFilter`
+   状态、以及 全部素材/文生图/图生图/视频 四个来源桶全部移除，连 `gallery.sources` 这个标题也
+   不再渲染。筛选列现在只有一条货架：第一行 `data-gallery-all`（全部素材，行尾是总数），之后
+   每个分类各占一行（行尾是该分类下的素材数），点击在「选中/取消」之间切换。模型、画面比例两段
+   保留，但只在库里真的存在多个模型 / 多种比例时出现。
+   - 原来按来源过滤的分支随之删除：来源桶不存在，`galleryFilter` 也就没有取值了。
+   - `gallery.sources` 这个本地化键留在三语表里但已无引用，下次清理时可以删。
+
+2. **画布 → 素材库**（`src/client/CanvasWorkspace.tsx`）：图片节点的右键菜单在「下载图片」旁边
+   新增「加入素材库」。实现是 `saveNodeToLibrary(node)`：`fetch(asset.url) → blob → base64`，
+   调 `api.galleryAppend`，`mode: 'text'`、`model` 记为「画布」、`prompt` 用节点标题。
+   宿主按内容哈希去重，因此重复点不会多出条目，提示词会从「已加入素材库」变成「已在素材库中」。
+
+3. **跨面刷新**：新增 DOM 事件 `dsh-imagegen-studio:gallery-changed`。画布入库成功、工作室
+   自动入库成功都会广播；`ImageGenPanel` 挂了一个监听，收到就重新 `galleryList()` 覆盖
+   entries/trash/categories。素材库只有一份，哪个面写入都该让正开着的列表立刻跟上，而不是等
+   用户关掉面板再打开。
+
+4. **冒烟 E1 适配新货架**（`scripts/smoke.mjs`）：原来那段「点视频来源桶 → 只剩剪贴」的断言
+   改成了断言新形状——第一行是「全部素材」且默认选中、图片卡片与剪贴卡片并列出现。来源桶已退休，
+   再去点它就是测一个不存在的东西。
+
+验证：`npm run build`（`lib/client.js` 2,734,015 B）后九个套件全绿；`node scripts/smoke.mjs`
+仍 89/89（只换了那段断言的内容，条目数不变）。
