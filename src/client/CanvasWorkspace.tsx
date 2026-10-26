@@ -38,6 +38,14 @@ import { CanvasFileBody, CanvasFileOverlay, fileKindLabel, fileKindOfAsset, file
 import { Select } from './Select.tsx'
 import { CanvasVideoPicker } from './CanvasVideoPicker.tsx'
 import { onTablistKeyDown, tabIndexFor } from './tablist.ts'
+import {
+  CANVAS_OPEN_EVENT,
+  CANVAS_REMOVED_EVENT,
+  clearPendingCanvasOpen,
+  takePendingCanvasOpen,
+  type CanvasOpenRequest,
+  type CanvasRemovedNotice,
+} from './canvas-open.ts'
 import css from './canvas-workspace.module.css'
 
 /** Base64 payload of one blob, without the `data:` prefix: the shape the
@@ -4502,6 +4510,31 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
     let disposed = false
     void api.canvasList().then(async list => {
       if (disposed) return
+      // 素材库的历史栏可能在画布挂载之前就点名了要开哪一张。那条请求先于本
+      // effect，事件路径当时还没有监听者，所以插槽里的这一份必须优先于
+      // 「列表第一张」，否则用户点了「打开画布」却落在别的画布上。
+      const requested = takePendingCanvasOpen()
+      if (requested !== undefined && list.some(project => project.id === requested.canvasId)) {
+        const target = normalizeConfigNodeSizes(await api.canvasRead(requested.canvasId))
+        if (disposed) return
+        setProjects(list)
+        setDocument(target)
+        syncedRef.current = JSON.stringify(target)
+        setSaveState('saved')
+        if (requested.nodeId !== undefined) {
+          const node = target.nodes.find(item => item.id === requested.nodeId)
+          if (node !== undefined) {
+            setSelectedIds(new Set([node.id]))
+            const scale = target.viewport.k
+            setViewport({
+              k: scale,
+              x: viewportSize.width / 2 - (node.x + node.width / 2) * scale,
+              y: viewportSize.height / 2 - (node.y + node.height / 2) * scale,
+            })
+          }
+        }
+        return
+      }
       const created = list[0] === undefined ? await api.canvasCreate(tt('canvas.untitled')) : null
       const first = created === null ? await api.canvasRead(list[0]!.id) : seedDocument(created)
       if (disposed) return
@@ -4511,6 +4544,9 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
       setSaveState('saved')
     }).catch(caught => { if (!disposed) { setError(caught instanceof Error ? caught.message : String(caught)); setSaveState('error') } })
     return () => { disposed = true }
+    // `viewportSize` 只在挂载那一刻量一次就够了：这里读它是为了把请求的节点
+    // 居中，重新测量不应该重跑整个加载（那会丢掉用户当场做的编辑）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, seedDocument])
 
   /**
@@ -5336,14 +5372,72 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
     } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)) }
   }, [api, flushPendingCanvas])
 
-  const selectProject = useCallback(async (id: string): Promise<void> => {    try {
+  /**
+   * 切到另一张画布；`focusNodeId` 是「从历史/素材库跳回生成它的那个节点」用的：
+   * 光打开画布还不够，节点可能在视野之外，所以要顺带选中并居中。
+   */
+  const selectProject = useCallback(async (id: string, focusNodeId?: string): Promise<void> => {
+    try {
       await flushPendingCanvas()
       const next = await api.canvasRead(id)
-      setDocument(normalizeConfigNodeSizes(next)); setSelectedIds(new Set()); setSelectedConnectionId(null)
+      const normalized = normalizeConfigNodeSizes(next)
+      setDocument(normalized); setSelectedIds(new Set()); setSelectedConnectionId(null)
       syncedRef.current = JSON.stringify(next); setSaveState('saved')
       pastRef.current = []; futureRef.current = []; setHistoryVersion(version => version + 1)
+      if (focusNodeId !== undefined) {
+        const node = normalized.nodes.find(item => item.id === focusNodeId)
+        if (node !== undefined) {
+          setSelectedIds(new Set([node.id]))
+          const scale = normalized.viewport.k
+          setViewport({
+            k: scale,
+            x: viewportSize.width / 2 - (node.x + node.width / 2) * scale,
+            y: viewportSize.height / 2 - (node.y + node.height / 2) * scale,
+          })
+        }
+      }
     } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)) }
-  }, [api, flushPendingCanvas])
+  }, [api, flushPendingCanvas, setViewport, viewportSize.height, viewportSize.width])
+
+  /**
+   * 素材库的历史栏点「打开画布」时，画布通常已经在屏幕上了，走这条事件路径；
+   * 还没挂载的那种（面板切工作区后立刻点）由加载 effect 从插槽里取走。
+   */
+  useEffect(() => {
+    const onOpen = (event: Event): void => {
+      const detail = (event as CustomEvent<CanvasOpenRequest>).detail
+      if (detail === undefined || typeof detail.canvasId !== 'string') return
+      clearPendingCanvasOpen(detail.canvasId)
+      void selectProject(detail.canvasId, detail.nodeId)
+    }
+    window.addEventListener(CANVAS_OPEN_EVENT, onOpen)
+    return () => window.removeEventListener(CANVAS_OPEN_EVENT, onOpen)
+  }, [selectProject])
+
+  /**
+   * 左栏删掉一张画布时，画布这一半必须松手。
+   *
+   * WHY 必须有人接：删除只发生在左栏，这里还握着那张文档，下一次自动保存就会把
+   * 刚删掉的文件重新写回来——用户看到的是「删了又回来」。所以先离开这张文档
+   * （`selectProject` 开头会 flush 掉挂起的保存），落到另一张上，再补一次删除：
+   * 两次删除之间夹着那次 flush，正好把这个窗口关上。
+   */
+  useEffect(() => {
+    const onRemoved = (event: Event): void => {
+      const detail = (event as CustomEvent<CanvasRemovedNotice>).detail
+      const removed = detail?.canvasId
+      if (typeof removed !== 'string' || removed === '') return
+      if (documentRef.current?.id !== removed) return
+      const next = projects.find(project => project.id !== removed)
+      void (async (): Promise<void> => {
+        if (next === undefined) await newCanvas()
+        else await selectProject(next.id)
+        try { setProjects(await api.canvasRemove(removed)) } catch { /* 已经不在了，重复删除不必打扰用户 */ }
+      })()
+    }
+    window.addEventListener(CANVAS_REMOVED_EVENT, onRemoved)
+    return () => window.removeEventListener(CANVAS_REMOVED_EVENT, onRemoved)
+  }, [api, newCanvas, projects, selectProject])
 
   const currentProject = projects.find(project => project.id === document?.id)
   const favoriteProjects = projects.filter(project => project.favorite === true)

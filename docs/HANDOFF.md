@@ -400,3 +400,31 @@ vendor 副本已同步 1.16.9（`lib/index.js` 内可搜到「冲突插件」提
 
 验证：`npm run build` + `node scripts/verify-lib-sync.mjs` PASS；`node scripts/smoke.mjs` 全绿；
 vendor 副本已同步 1.16.10。
+
+## 19. 历史栏两个货架：生成记录 / 画布（1.16.11）
+
+用户看完截图后的原话（paraphrase）：历史记录就这么一个模块吗？左侧这些东西应该统一起来——普通生图的
+记录和无限画布的项目，感觉有点像。方案经用户确认（「可以」）后实施。
+
+1. **一个左栏，两个货架。** `src/client/ImageGenPanel.tsx` 的历史侧栏顶部加了分段控件
+   （`data-history-scopes` / `data-history-scope="generations|canvases"`）。切到画布货架时，生成记录
+   专属的 `data-history-filters`、`data-history-archived-toggle`、清空按钮一起离开视图——它们只管生成
+   记录，留在画布货架上就是撒谎。画布货架有自己的 `data-canvas-new`。
+2. **画布行。** 标题 / 节点数（`history.canvasMeta`）/ 更新时间，点开跳到那张画布；右键菜单与生成行
+   共用 `src/client/RowMenu.tsx`：打开 / 收藏（取消收藏）/ 删除，收藏的画布单独分组
+   （`history.canvasFavorites`）。列表来自 `api.canvasList()`，挂在挂载时读一次（来源标签要标题）。
+3. **互相认得。** 生成行与素材库卡片下方的 `history.fromCanvas` 标签用 `CanvasTaskMeta.sourceNodeId`
+   回到产出该图的节点；右键里是同一条 `history.openInCanvas`。
+4. **怎么跨组件打开某张画布。** 新增 `src/client/canvas-open.ts`：`requestCanvasOpen(target)` 既
+   `window.dispatchEvent('dsh-imagegen-studio:open-canvas')` 又记一份 pending，
+   `takePendingCanvasOpen()` 供后挂载的一方消费。面板先 `setWorkspace('canvas')` 再发事件，事件可能
+   早于 `CanvasWorkspace` 注册监听——pending 兜住这个顺序，两条路径都收敛到同一张画布。
+   `CanvasWorkspace.selectProject(id, nodeId?)` 打开后选中节点并把视口居中到它。
+5. **跟随但不抢。** 左栏货架跟随工作区（`workspace === 'canvas'` → 画布），只在工作区变化时跟随一次，
+   所以用户手动点回生成记录不会被 effect 抢回去。
+6. **冒烟。** E1 新增：两个货架都渲染、默认落在生成记录、切到画布后筛选/归档控件消失且
+   `data-canvas-new` 在场、切回来控件复原。踩到的两个坑都记在用例注释里：左栏跟随工作区导致
+   上面的导航步骤把货架停在画布（所以行断言前先显式切回生成记录）；切货架会重渲染，之前抓住的行节点
+   变成游离节点（所以要重新 query 再点）。
+
+验证：`npx tsc --noEmit`、`npm run build`（`lib/client.js` 2,765,851 B）、`node scripts/smoke.mjs` 全绿。

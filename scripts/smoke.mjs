@@ -5988,6 +5988,15 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     // opens, because comparison groups and product sets do not follow createdAt).
     const histHost = jsdomDocument.querySelector('[data-dsh-imagegen-studio-history-host]')
     assert.ok(histHost !== null, 'the history sidebar is mounted')
+    // The left column follows the workspace on purpose — standing on the canvas
+    // shows canvases — and the navigation steps above visited the canvas. Put
+    // the stills shelf back, then assert on still rows.
+    const stillsTab = histHost.querySelector('[data-history-scope="generations"]')
+    assert.ok(stillsTab !== null, 'the history column offers the stills shelf')
+    if (!stillsTab.hasAttribute('data-active')) {
+      stillsTab.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true, cancelable: true }))
+      await waitUntil(() => stillsTab.hasAttribute('data-active'), 'the stills shelf becomes active')
+    }
     const rowKinds = () => [...histHost.querySelectorAll('[data-kind]')].map(el => el.getAttribute('data-kind'))
     const rowPrompts = () => [...histHost.querySelectorAll('[data-dsh-imagegen-studio-history-main]')].map(el => el.querySelector('[class*="historyPrompt"]')?.textContent ?? '')
     assert.ok(rowKinds().includes('video'), 'clip rows appear in the same list as images')
@@ -6042,8 +6051,33 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     assert.deepEqual(menuKeys(clipMenu), ['open', 'conversation', 'canvas', 'gallery', 'delete'], 'the clip menu lists clip actions only')
     jsdomDocument.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
 
-    // Deleting a clip removes only that row, from the clip store.
-    const clipDelete = clipRow.querySelector('.historyIconAction[data-danger], [data-danger]')
+    // The left column carries two shelves: generated stills and canvas
+    // documents. They answer one question ("where is the thing I just made"),
+    // so switching has to be a single visible click, and the stills-only
+    // controls must leave with the stills shelf.
+    const scopes = histHost.querySelector('[data-history-scopes]')
+    assert.ok(scopes !== null, 'the history column offers both shelves')
+    const scopeTab = name => scopes.querySelector(`[data-history-scope="${name}"]`)
+    assert.ok(scopeTab('generations') !== null, 'the stills shelf tab renders')
+    assert.ok(scopeTab('canvases') !== null, 'the canvas shelf tab renders')
+    assert.ok(scopeTab('generations').hasAttribute('data-active'), 'generated stills are the shelf you land on')
+    const clickScope = async name => {
+      scopeTab(name).dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true, cancelable: true }))
+      await waitUntil(() => scopeTab(name).hasAttribute('data-active'), `the ${name} shelf becomes active`)
+    }
+    await clickScope('canvases')
+    await waitUntil(() => histHost.querySelector('[data-history-canvases]') !== null, 'the canvas shelf renders its list')
+    assert.equal(histHost.querySelector('[data-history-filters]') === null, true, 'the stills filters leave with the stills shelf')
+    assert.equal(histHost.querySelector('[data-history-archived-toggle]') === null, true, 'the archive toggle is a stills control')
+    assert.ok(histHost.querySelector('[data-canvas-new]') !== null, 'the canvas shelf can start a new canvas')
+    await clickScope('generations')
+    await waitUntil(() => histHost.querySelector('[data-history-filters]') !== null, 'the stills shelf comes back with its filters')
+    assert.ok(histHost.querySelector('[data-history-archived-toggle]') !== null, 'the archive toggle returns with the stills shelf')
+
+    // Switching shelves re-renders the list, so the clip row captured above is
+    // detached by now. Re-query it before acting through it.
+    const liveClipRow = [...histHost.querySelectorAll('[data-video-row]')][0]
+    const clipDelete = liveClipRow.querySelector('.historyIconAction[data-danger], [data-danger]')
     assert.ok(clipDelete !== null, 'the clip row offers a delete action')
     clipDelete.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true, cancelable: true }))
     assert.ok(

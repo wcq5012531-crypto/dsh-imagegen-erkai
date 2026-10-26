@@ -8,7 +8,7 @@
 export const IMAGEGEN_SETTINGS_NAMESPACE = 'dsh-imagegen-studio'
 
 /** Published package version shared by the host updater and the client UI. */
-export const PLUGIN_VERSION = '1.16.10'
+export const PLUGIN_VERSION = '1.16.11'
 
 /** Same-origin route family (loopback-only, mirroring the dsh-ssh fence). */
 export const SETTINGS_API = {

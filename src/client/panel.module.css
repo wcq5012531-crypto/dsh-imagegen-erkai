@@ -4214,3 +4214,56 @@ a.galleryCardAction {
 .rowMenuItem:hover:not(:disabled) { background: var(--dsw-alias-bg-layer-2); }
 .rowMenuItem[data-danger] { color: var(--dsw-alias-state-error); }
 .rowMenuItem:disabled { color: var(--dsw-alias-label-tertiary); cursor: default; }
+
+/* 生成记录 / 画布：同一栏的两个货架。用分段控件而不是两个导航入口，是因为它们
+   回答同一个问题——「我刚才做的东西在哪」——切换要一眼可见、一次点击。 */
+.historyScopes {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px 6px;
+}
+
+.historyScopeTab {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-secondary);
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.historyScopeTab:hover { color: var(--dsw-alias-label-primary); }
+
+.historyScopeTab[data-active] {
+  color: var(--dsw-alias-brand-primary);
+  border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent);
+}
+
+/* 分组小标题（收藏的画布 / 其余画布）。 */
+.historySection {
+  padding: 8px 10px 2px;
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* 画布行的占位缩略图：与图片行的 .historyThumbPlaceholder 同尺寸，里面放一个
+   「画布」字形，让人一眼分清这一行是文档而不是图。 */
+.canvasRowGlyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border-radius: 7px;
+  color: var(--dsw-alias-label-tertiary);
+  background: var(--dsw-alias-bg-layer-2);
+}

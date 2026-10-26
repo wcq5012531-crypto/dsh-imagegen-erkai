@@ -32,9 +32,10 @@ import { PptWorkspace } from './PptWorkspace.tsx'
 import { ModelPicker, resolveModelChoice, type ModelPickerValue } from './ModelPicker.tsx'
 import { DiagnosticsButton, DiagnosticsPanel } from './DiagnosticsPanel.tsx'
 import { RowMenu, useRowMenu, type RowMenuItem } from './RowMenu.tsx'
+import { announceCanvasRemoved, requestCanvasOpen } from './canvas-open.ts'
 import { GenerationLoading } from './GenerationLoading.tsx'
 import { useImageGenLanguageTick } from './use-language.ts'
-import type { EcommerceRefRole, GenerateMode, GenerateRequest, GeneratedImage, GenerationTask, GenerationTaskStatus, GenerationTaskSummary, HistoryEntry, HistoryImageRef, ProductSetDraft, ProductSetSlot, UpdateInfo, VideoHistoryEntry, VideoTaskSummary } from '../protocol.ts'
+import type { CanvasSummary, CanvasTaskMeta, EcommerceRefRole, GenerateMode, GenerateRequest, GeneratedImage, GenerationTask, GenerationTaskStatus, GenerationTaskSummary, HistoryEntry, HistoryImageRef, ProductSetDraft, ProductSetSlot, UpdateInfo, VideoHistoryEntry, VideoTaskSummary } from '../protocol.ts'
 import { AGENT_IMAGE_API, SUBSCRIPTION_API, SUBSCRIPTION_PROVIDERS, type SubscriptionProvider } from '../protocol.ts'
 import type { ImageGenConfig, ImageGenScope, ImageModelGroup } from './settings-scope.ts'
 import { imageModelOptions, videoModelOptions } from './settings-scope.ts'
@@ -925,6 +926,17 @@ export function ImageGenPanel(props: {
   const [archivedHistory, setArchivedHistory] = useState<HistoryEntry[]>([])
   const [historyArchivedOpen, setHistoryArchivedOpen] = useState(false)
   const [historyArchivingId, setHistoryArchivingId] = useState<string | null>(null)
+  /**
+   * 左边这一栏现在管两个货架：生成记录，和画布。
+   *
+   * WHY 放在同一栏而不是各占一个导航入口：画布本身就是生成落地的地方（节点上
+   * 的渠道/模型和这里的图用的是同一套选择），所以它的项目应当和它产出的图并排
+   * 出现，而不是躲在另一个入口后面让人找不到。
+   */
+  const [historyScope, setHistoryScope] = useState<'generations' | 'canvases'>('generations')
+  const [canvasProjects, setCanvasProjects] = useState<CanvasSummary[]>([])
+  const [canvasScopeError, setCanvasScopeError] = useState<string | null>(null)
+  const [canvasBusyId, setCanvasBusyId] = useState<string | null>(null)
   const [viewingHistoryId, setViewingHistoryId] = useState<string | null>(null)
   /** The clip currently open in the video tab (mirrors viewingHistoryId). */
   const [viewingVideoId, setViewingVideoId] = useState<string | null>(null)
@@ -2829,6 +2841,103 @@ export function ImageGenPanel(props: {
     }
   }, [openRowMenu])
 
+  // -------------------------------------------------------- canvas projects
+
+  const loadCanvasProjects = useCallback(async (): Promise<void> => {
+    try {
+      setCanvasProjects(await api.canvasList())
+      setCanvasScopeError(null)
+    } catch (caught) {
+      setCanvasScopeError(caught instanceof Error ? caught.message : String(caught))
+    }
+  }, [api])
+
+  // 画布标题要给「来自画布 ×」的来源标签用，所以挂载就读一次。这只是元数据
+  // （标题/节点数/时间），比等到切到画布页才读更不容易让人先看到一个没有名字的标签。
+  useEffect(() => { void loadCanvasProjects() }, [loadCanvasProjects])
+
+  /**
+   * 工作区和左栏货架是同一件事的两面：人站在画布上，左栏就该是画布。
+   *
+   * WHY 只跟随「工作区切换」而不是每次渲染：跟随一次之后用户手动点回「生成记录」
+   * 查旧图，是正当选择，不能被一个还在跑的 effect 抢回去。
+   */
+  useEffect(() => {
+    setHistoryScope(workspace === 'canvas' ? 'canvases' : 'generations')
+  }, [workspace])
+
+  /** 打开一张画布；`nodeId` 是「回到产出这张图的节点」那条路。 */
+  const openCanvasProject = useCallback((canvasId: string, nodeId?: string): void => {
+    setWorkspace('canvas')
+    requestCanvasOpen(nodeId === undefined ? { canvasId } : { canvasId, nodeId })
+  }, [])
+
+  const createCanvasProject = useCallback(async (): Promise<void> => {
+    try {
+      const created = await api.canvasCreate(tt('canvas.untitled'))
+      await loadCanvasProjects()
+      openCanvasProject(created.id)
+    } catch (caught) {
+      setCanvasScopeError(caught instanceof Error ? caught.message : String(caught))
+    }
+  }, [api, loadCanvasProjects, openCanvasProject])
+
+  const favoriteCanvasProject = useCallback(async (project: CanvasSummary): Promise<void> => {
+    setCanvasBusyId(project.id)
+    try {
+      setCanvasProjects(await api.canvasFavorite(project.id, project.favorite !== true))
+      setCanvasScopeError(null)
+    } catch (caught) {
+      setCanvasScopeError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setCanvasBusyId(null)
+    }
+  }, [api])
+
+  const removeCanvasProject = useCallback(async (project: CanvasSummary): Promise<void> => {
+    const name = project.title.trim() === '' ? tt('canvas.untitled') : project.title.trim()
+    // 画布是一整份文档，不是一条记录：删掉它连节点一起没了，所以要先问一句。
+    if (!window.confirm(tt('history.canvasDeleteConfirm', { name }))) return
+    setCanvasBusyId(project.id)
+    try {
+      setCanvasProjects(await api.canvasRemove(project.id))
+      setCanvasScopeError(null)
+      // 画布那一半还握着这张文档，不说一声它会用下一次自动保存把文件写回来。
+      announceCanvasRemoved(project.id)
+    } catch (caught) {
+      setCanvasScopeError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setCanvasBusyId(null)
+    }
+  }, [api])
+
+  const canvasFavoriteProjects = canvasProjects.filter(project => project.favorite === true)
+  const canvasOtherProjects = canvasProjects.filter(project => project.favorite !== true)
+
+  /**
+   * 历史行上的「来自画布 ×」标签用的名字。挂在行上的是 {@link CanvasTaskMeta}，
+   * 名字要现查：画布可能已经被删掉，那时只说「画布」，不编一个假名字出来。
+   */
+  const canvasLabelFor = useCallback((meta: CanvasTaskMeta): string => {
+    const title = canvasProjects.find(project => project.id === meta.canvasId)?.title.trim() ?? ''
+    return title === '' ? tt('history.canvasUnknown') : title
+  }, [canvasProjects])
+
+  /**
+   * 给行菜单补一项「在画布中打开」。
+   *
+   * WHY 做成菜单项而不是行内图标：行本身已经是一个按钮（点它是看生成结果），往里
+   * 再塞一个按钮既不合规、也会抢走那次点击；菜单正是这一栏已经存在的第二入口。
+   */
+  const withCanvasOrigin = useCallback((items: RowMenuItem[], origin: CanvasTaskMeta | undefined): RowMenuItem[] => {
+    if (origin === undefined) return items
+    return [...items, {
+      key: 'openInCanvas',
+      label: tt('history.openInCanvas'),
+      run: () => { openCanvasProject(origin.canvasId, origin.sourceNodeId) },
+    }]
+  }, [openCanvasProject])
+
   // Render history into the shell sidebar so it remains a separate navigation
   // surface from both the image workspace and the native conversation.
   const historyPanel = (
@@ -2836,37 +2945,78 @@ export function ImageGenPanel(props: {
       <header className={css.historyHeader}>
         <span className={css.historyTitle}>{tt('history.title')}</span>
         <div className={css.historyHeaderActions}>
-          {/* A labelled button, not a bare glyph: the icon-only version read as
-              decoration to anyone who had not used it before. */}
-          <button
-            type="button"
-            className={css.historyClear}
-            data-history-new=""
-            title={tt('canvas.newHint')}
-            onClick={startNewCreation}
-          >
-            ＋ {tt('history.newThread')}
-          </button>
-          <button
-            type="button"
-            className={css.historyArchivedToggle}
-            data-active={historyArchivedOpen ? '' : undefined}
-            data-history-archived-toggle=""
-            aria-pressed={historyArchivedOpen}
-            title={tt('history.archivedHint')}
-            onClick={() => { void toggleArchivedHistory() }}
-          >
-            {tt('history.archived')}{archivedHistory.length === 0 ? '' : ` ${String(archivedHistory.length)}`}
-          </button>
-          {!historyArchivedOpen && unifiedHistory.length > 0 ? (
-            <button type="button" className={css.historyClear} data-history-clear="" onClick={() => { void clearHistory() }}>
-              {tt('history.clear')}
+          {historyScope === 'canvases' ? (
+            <button
+              type="button"
+              className={css.historyClear}
+              data-canvas-new=""
+              title={tt('canvas.newHint')}
+              onClick={() => { void createCanvasProject() }}
+            >
+              ＋ {tt('history.newCanvas')}
             </button>
-          ) : null}
+          ) : (
+            <>
+              {/* A labelled button, not a bare glyph: the icon-only version read as
+                  decoration to anyone who had not used it before. */}
+              <button
+                type="button"
+                className={css.historyClear}
+                data-history-new=""
+                title={tt('canvas.newHint')}
+                onClick={startNewCreation}
+              >
+                ＋ {tt('history.newThread')}
+              </button>
+              <button
+                type="button"
+                className={css.historyArchivedToggle}
+                data-active={historyArchivedOpen ? '' : undefined}
+                data-history-archived-toggle=""
+                aria-pressed={historyArchivedOpen}
+                title={tt('history.archivedHint')}
+                onClick={() => { void toggleArchivedHistory() }}
+              >
+                {tt('history.archived')}{archivedHistory.length === 0 ? '' : ` ${String(archivedHistory.length)}`}
+              </button>
+              {!historyArchivedOpen && unifiedHistory.length > 0 ? (
+                <button type="button" className={css.historyClear} data-history-clear="" onClick={() => { void clearHistory() }}>
+                  {tt('history.clear')}
+                </button>
+              ) : null}
+            </>
+          )}
         </div>
       </header>
 
-      <div className={css.historyFilters}>
+      {/* 生成记录 / 画布：同一栏的两个货架。用 tab 而不是两个导航入口，是因为
+          它们回答同一个问题——「我刚才做的东西在哪」。 */}
+      <div className={css.historyScopes} role="tablist" aria-label={tt('history.scope')} data-history-scopes="">
+        {(['generations', 'canvases'] as const).map(scope => (
+          <button
+            key={scope}
+            type="button"
+            role="tab"
+            className={css.historyScopeTab}
+            data-active={historyScope === scope ? '' : undefined}
+            data-history-scope={scope}
+            aria-selected={historyScope === scope}
+            tabIndex={historyScope === scope ? 0 : -1}
+            onClick={() => {
+              setHistoryScope(scope)
+              // 画布列表是别处也会改的东西（工作室里新建/删除），每次切过来重读一遍，
+              // 比留着一份可能已经过期的快照强。
+              if (scope === 'canvases') void loadCanvasProjects()
+            }}
+          >
+            {scope === 'generations' ? tt('history.scopeGenerations') : tt('history.scopeCanvases')}
+            {scope === 'canvases' && canvasProjects.length > 0 ? ` ${String(canvasProjects.length)}` : ''}
+          </button>
+        ))}
+      </div>
+
+      {historyScope !== 'generations' ? null : (
+        <div className={css.historyFilters} data-history-filters="">
         <input className={css.historySearch} value={historyQuery} onChange={event => { setHistoryQuery(event.target.value) }} placeholder={tt('history.search')} aria-label={tt('history.search')} />
         <Select value={historyKindFilter} onChange={value => { setHistoryKindFilter(value as 'all' | 'image' | 'video') }} aria-label={tt('history.kind')}>
           <option value="all">{tt('history.allKinds')}</option>
@@ -2883,9 +3033,11 @@ export function ImageGenPanel(props: {
         </Select>
       </div>
 
+      )}
+
       {/* 普通生图 is one long conversation, so its thread list belongs here
           rather than in a second column inside the studio. */}
-      {studioThreads.length === 0 || workspace !== 'studio' ? null : (
+      {historyScope !== 'generations' || studioThreads.length === 0 || workspace !== 'studio' ? null : (
         <div className={css.historyList} data-studio-threads="">
           {studioThreads.map(row => (
             <div
@@ -2932,7 +3084,78 @@ export function ImageGenPanel(props: {
         </div>
       )}
 
-      {historyArchivedOpen ? (
+      {historyScope === 'canvases' ? (
+        <div className={css.historyList} data-history-canvases="">
+          {canvasScopeError === null ? null : (
+            <div className={css.historyEmpty} data-canvas-error="">{canvasScopeError}</div>
+          )}
+          {canvasProjects.length === 0 ? (
+            <div className={css.historyEmpty} data-canvas-empty="">{tt('history.canvasesEmpty')}</div>
+          ) : (
+            <>
+              {canvasFavoriteProjects.length === 0 ? null : (
+                <div className={css.historySection}>{tt('history.canvasFavorites')}</div>
+              )}
+              {[...canvasFavoriteProjects, ...canvasOtherProjects].map(project => {
+                const title = project.title.trim() === '' ? tt('canvas.untitled') : project.title.trim()
+                return (
+                  <div key={project.id} className={css.historyItem} data-kind="canvas" data-canvas-busy={canvasBusyId === project.id ? '' : undefined}
+                    ref={contextMenuFor([
+                      { key: 'open', label: tt('menu.open'), run: () => { openCanvasProject(project.id) } },
+                      { key: 'favorite', label: project.favorite === true ? tt('history.canvasUnfavorite') : tt('history.canvasFavorite'), run: () => { void favoriteCanvasProject(project) } },
+                      { key: 'delete', label: tt('history.delete'), danger: true, run: () => { void removeCanvasProject(project) } },
+                    ])}
+                  >
+                    <button type="button" className={css.historyMain} data-canvas-row={project.id} onClick={() => { openCanvasProject(project.id) }}>
+                      <span className={css.canvasRowGlyph} aria-hidden="true">
+                        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="1.8" y="2.6" width="5.4" height="4.4" rx="1" />
+                          <rect x="8.8" y="2.6" width="5.4" height="4.4" rx="1" />
+                          <rect x="1.8" y="9" width="12.4" height="4.4" rx="1" />
+                          <path d="M7.2 4.8h1.6" />
+                        </svg>
+                      </span>
+                      <span className={css.historyInfo}>
+                        <span className={css.historyPrompt}>{title}</span>
+                        <span className={css.historyMeta}>
+                          {tt('history.canvasMeta', { count: project.nodeCount })}
+                          {' · '}{formatTime(project.updatedAt)}
+                        </span>
+                      </span>
+                    </button>
+                    <span className={css.historyActions}>
+                      <button
+                        type="button"
+                        className={css.historyIconAction}
+                        data-active={project.favorite === true ? '' : undefined}
+                        disabled={canvasBusyId === project.id}
+                        title={project.favorite === true ? tt('history.canvasUnfavorite') : tt('history.canvasFavorite')}
+                        aria-label={project.favorite === true ? tt('history.canvasUnfavorite') : tt('history.canvasFavorite')}
+                        data-canvas-favorite=""
+                        onClick={() => { void favoriteCanvasProject(project) }}
+                      >
+                        <svg viewBox="0 0 16 16" width="14" height="14" fill={project.favorite === true ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" aria-hidden="true"><path d="M8 2.2l1.7 3.6 3.9.5-2.9 2.7.7 3.9L8 11l-3.4 1.9.7-3.9L2.4 6.3l3.9-.5z" /></svg>
+                      </button>
+                      <button
+                        type="button"
+                        className={css.historyIconAction}
+                        data-danger
+                        disabled={canvasBusyId === project.id}
+                        title={tt('history.delete')}
+                        aria-label={tt('history.delete')}
+                        data-canvas-delete=""
+                        onClick={() => { void removeCanvasProject(project) }}
+                      >
+                        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 4.5h11" /><path d="M6 4.5V3.2a.7.7 0 0 1 .7-.7h2.6a.7.7 0 0 1 .7.7v1.3" /><path d="M4.3 4.5l.6 8.1a1 1 0 0 0 1 .9h4.2a1 1 0 0 0 1-.9l.6-8.1" /><path d="M6.7 7v4M9.3 7v4" /></svg>
+                      </button>
+                    </span>
+                  </div>
+                )
+              })}
+            </>
+          )}
+        </div>
+      ) : historyArchivedOpen ? (
         archivedHistory.length === 0 ? (
           <div className={css.historyEmpty}>{tt('history.archivedEmpty')}</div>
         ) : (
@@ -3001,6 +3224,9 @@ export function ImageGenPanel(props: {
         <div className={css.historyList}>
           {unifiedHistory.map(row => {
             const isVideoRow = row.kind === 'video'
+            // 这张图是在哪张画布上生成的（有的话）。它让「历史记录」和「画布」两个
+            // 货架真的连起来：看到图就知道出处，点一下能跳回产出它的那个节点。
+            const origin = isVideoRow ? undefined : row.group!.entries[0]!.canvas
             const isActive = isVideoRow
               ? viewingVideoId === row.entry!.id
               : row.group!.entries.some(item => item.id === viewingHistoryId)
@@ -3011,7 +3237,7 @@ export function ImageGenPanel(props: {
                 data-active={isActive ? '' : undefined}
                 data-kind={row.kind}
                 data-video-row={isVideoRow ? '' : undefined}
-                ref={contextMenuFor(isVideoRow
+                ref={contextMenuFor(withCanvasOrigin(isVideoRow
                   ? [
                       { key: 'open', label: tt('menu.open'), run: () => { openVideoFromHistory(row.entry!) } },
                       { key: 'conversation', label: tt('conversation.add'), run: () => { void addClipToConversation(row.entry!.videos[0]!.url, `history-clip:${row.entry!.id}`) } },
@@ -3026,7 +3252,7 @@ export function ImageGenPanel(props: {
                       { key: 'canvas', label: tt('canvas.addToCanvas'), run: () => { addEntryToCanvas('history', row.group!.entries[0]!.id, 0) } },
                       { key: 'archive', label: tt('history.archive'), disabled: historyArchivingId !== null, run: () => { void archiveHistoryGroup(row.group!) } },
                       { key: 'delete', label: tt('history.delete'), danger: true, run: () => { void deleteHistoryGroup(row.group!) } },
-                    ])}
+                    ], origin))}
                 data-comparison={!isVideoRow && row.group!.models.length > 1 ? '' : undefined}
               >
                 <button
@@ -3061,6 +3287,7 @@ export function ImageGenPanel(props: {
                       {row.meta}
                       {' · '}{row.models.join(' · ')}
                       {' · '}{formatTime(row.createdAt)}
+                      {origin === undefined ? null : <>{' · '}{tt('history.fromCanvas', { name: canvasLabelFor(origin) })}</>}
                     </span>
                   </span>
                 </button>
