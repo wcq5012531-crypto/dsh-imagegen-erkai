@@ -4254,9 +4254,10 @@ a.galleryCardAction {
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* 画布行的占位缩略图：与图片行的 .historyThumbPlaceholder 同尺寸，里面放一个
-   「画布」字形，让人一眼分清这一行是文档而不是图。 */
-.canvasRowGlyph {
+/* 货架行左侧的图标位：与图片行的 .historyThumbPlaceholder 同尺寸，里面放一个
+   字形（会话是对话气泡，画布是画板格子），让人一眼分清这一行是什么。 */
+.canvasRowGlyph,
+.shelfGlyph {
   display: flex;
   align-items: center;
   justify-content: center;

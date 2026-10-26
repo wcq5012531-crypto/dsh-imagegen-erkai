@@ -757,6 +757,51 @@ function readShellThreads(): ShellThreadRow[] {
   }
 }
 
+/** 一个货架行身上「不属于本体数据」的两个标记：收藏与归档。 */
+interface ShelfFlag {
+  favorite?: boolean
+  archived?: boolean
+}
+
+/**
+ * 会话（studio 对话）的收藏/归档不在宿主存储里，画布的收藏/归档在宿主存储里。
+ * 为了两种行长得一模一样，会话这两个标记落在本地：一份 id → 标记的表，
+ * 只记「被用户动过」的项，没动过的会话不占空间。
+ */
+const SHELF_FLAGS_KEY = 'dsh-imagegen-studio:shelf-flags'
+
+/** @returns 解析出的标记表；坏数据当作空表，绝不让侧栏挂掉。 */
+function readShelfFlags(): Record<string, ShelfFlag> {
+  try {
+    const raw = window.localStorage.getItem(SHELF_FLAGS_KEY)
+    if (raw === null || raw === '') return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const flags: Record<string, ShelfFlag> = {}
+    for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (id === '' || value === null || typeof value !== 'object') continue
+      const record = value as Record<string, unknown>
+      const flag: ShelfFlag = {}
+      if (record.favorite === true) flag.favorite = true
+      if (record.archived === true) flag.archived = true
+      if (flag.favorite !== true && flag.archived !== true) continue
+      flags[id] = flag
+    }
+    return flags
+  } catch {
+    return {}
+  }
+}
+
+/** 写回标记表；存储被禁用或写满时静默放弃，界面照常工作。 */
+function writeShelfFlags(flags: Record<string, ShelfFlag>): void {
+  try {
+    window.localStorage.setItem(SHELF_FLAGS_KEY, JSON.stringify(flags))
+  } catch {
+    /* 隐私模式或配额用尽：这一轮的选择不持久化，比抛错强。 */
+  }
+}
+
 /** Render the studio. */
 export function ImageGenPanel(props: {
   api: ImageGenApi
@@ -973,6 +1018,7 @@ export function ImageGenPanel(props: {
   // history at render time (see UnifiedHistoryRow).
   const [videoHistory, setVideoHistory] = useState<VideoHistoryEntry[]>([])
   const [studioThreads, setStudioThreads] = useState<ShellThreadRow[]>(() => readShellThreads())
+  const [shelfFlags, setShelfFlags] = useState<Record<string, ShelfFlag>>(() => readShelfFlags())
   const [activeStudioThread, setActiveStudioThread] = useState<string>('')
   const [preview, setPreview] = useState<{ images: GeneratedImage[]; index: number } | null>(null)
   /** The gallery clip open in the full-screen player (images use `preview`). */
@@ -2953,6 +2999,173 @@ export function ImageGenPanel(props: {
    * 只放最常用的三个（收藏/归档/删除），改名、复制 ID、在文件管理器里打开这类长尾
    * 动作全部进右键菜单——历史行也是这套分工。
    */
+  // ── 货架行：会话与画布共用同一张脸 ─────────────────────────────────────────
+  // 左栏同时放两种「项目行」：studio 会话和画布。两者回答同一个问题（我刚做的
+  // 东西在哪），所以结构、图标位、右键菜单必须一致；差异只允许在「打开去哪」
+  // 与「本体数据从哪来」。行从这里统一渲染，任何一侧加动作都要两边同时受益。
+  const studioRowsLive = studioThreads.filter(row => shelfFlags[row.id]?.archived !== true)
+  const studioRowsArchived = studioThreads.filter(row => shelfFlags[row.id]?.archived === true)
+  const archivedShelfCount = historyScope === 'canvases'
+    ? canvasArchivedProjects.length
+    : archivedHistory.length + studioRowsArchived.length
+
+  const setShelfFlag = useCallback((id: string, patch: ShelfFlag): void => {
+    setShelfFlags(current => {
+      const next: Record<string, ShelfFlag> = { ...current }
+      const merged: ShelfFlag = { ...(next[id] ?? {}), ...patch }
+      if (merged.favorite !== true && merged.archived !== true) delete next[id]
+      else {
+        next[id] = {
+          ...(merged.favorite === true ? { favorite: true } : {}),
+          ...(merged.archived === true ? { archived: true } : {}),
+        }
+      }
+      writeShelfFlags(next)
+      return next
+    })
+  }, [])
+
+  /** 打开一条会话：切到工作室并让它选中。payload 归工作室，侧栏只发事件。 */
+  const openStudioThread = useCallback((id: string): void => {
+    setWorkspace('studio')
+    window.dispatchEvent(new CustomEvent('dsh-imagegen-studio:studio-select', { detail: { threadId: id } }))
+  }, [])
+
+  const renameStudioThread = useCallback((row: ShellThreadRow): void => {
+    const next = window.prompt(tt('history.rename'), row.title)
+    if (next === null) return
+    const trimmed = next.trim()
+    if (trimmed === '' || trimmed === row.title) return
+    window.dispatchEvent(new CustomEvent('dsh-imagegen-studio:studio-rename', { detail: { threadId: row.id, title: trimmed } }))
+    setStudioThreads(previous => previous.map(item => item.id === row.id ? { ...item, title: trimmed } : item))
+    // 工作室落盘有防抖，等一拍从存储里读回真值，别信乐观更新。
+    window.setTimeout(() => { setStudioThreads(readShellThreads()) }, 700)
+  }, [tt])
+
+  const deleteStudioThread = useCallback((row: ShellThreadRow): void => {
+    window.dispatchEvent(new CustomEvent('dsh-imagegen-studio:studio-delete', { detail: { threadId: row.id } }))
+    setStudioThreads(previous => previous.filter(item => item.id !== row.id))
+    window.setTimeout(() => { setStudioThreads(readShellThreads()) }, 700)
+    setShelfFlag(row.id, {})
+  }, [setShelfFlag])
+
+  interface ShelfRowSpec {
+    rowKey: string
+    kind: 'studio' | 'canvas'
+    glyph: ReactNode
+    title: string
+    meta: ReactNode
+    active?: boolean
+    busy?: boolean
+    favorite: boolean
+    archived: boolean
+    /** 外部脚本与冒烟用例定位行、点动作用的 data-* 钩子。 */
+    attrs: {
+      row: Record<string, string>
+      favorite?: Record<string, string>
+      archive?: Record<string, string>
+      unarchive?: Record<string, string>
+      delete: Record<string, string>
+    }
+    items: RowMenuItem[]
+    onOpen: () => void
+    onFavorite: () => void
+    onArchive: (archived: boolean) => void
+    onDelete: () => void
+  }
+
+  const renderShelfRow = (spec: ShelfRowSpec): ReactNode => (
+    <div
+      key={spec.rowKey}
+      className={css.historyItem}
+      data-kind={spec.kind}
+      data-active={spec.active === true ? '' : undefined}
+      data-archived={spec.archived ? '' : undefined}
+      data-busy={spec.busy === true ? '' : undefined}
+      // 行的能力清单，写进 DOM 是为了让「两类行必须同规格」这件事可被断言，
+      // 而不是只靠人眼比对截图。
+      data-shelf-actions={spec.archived ? 'open rename unarchive delete' : 'open rename favorite archive delete'}
+      ref={contextMenuFor(spec.items)}
+    >
+      <button type="button" className={css.historyMain} {...spec.attrs.row} onClick={spec.onOpen}>
+        <span className={css.shelfGlyph} aria-hidden="true">{spec.glyph}</span>
+        <span className={css.historyInfo}>
+          <span className={css.historyPrompt}>{spec.title}</span>
+          <span className={css.historyMeta}>{spec.meta}</span>
+        </span>
+      </button>
+      <span className={css.historyActions}>
+        {spec.archived ? (
+          <button
+            type="button"
+            className={css.historyIconAction}
+            disabled={spec.busy === true}
+            title={tt('history.unarchive')}
+            aria-label={tt('history.unarchive')}
+            {...(spec.attrs.unarchive ?? {})}
+            onClick={() => { spec.onArchive(false) }}
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 9.5h3l1 1.8h3l1-1.8h3" /><path d="M3.6 9V4.6a1 1 0 0 1 1-1h6.8a1 1 0 0 1 1 1V9" /><path d="M8 7.6V3.4" /><path d="M6.4 5L8 3.4 9.6 5" /></svg>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className={css.historyIconAction}
+            data-active={spec.favorite ? '' : undefined}
+            disabled={spec.busy === true}
+            title={spec.favorite ? tt('history.unfavorite') : tt('history.favorite')}
+            aria-label={spec.favorite ? tt('history.unfavorite') : tt('history.favorite')}
+            {...(spec.attrs.favorite ?? {})}
+            onClick={spec.onFavorite}
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" fill={spec.favorite ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" aria-hidden="true"><path d="M8 2.2l1.7 3.6 3.9.5-2.9 2.7.7 3.9L8 11l-3.4 1.9.7-3.9L2.4 6.3l3.9-.5z" /></svg>
+          </button>
+        )}
+        {spec.archived ? null : (
+          <button
+            type="button"
+            className={css.historyIconAction}
+            disabled={spec.busy === true}
+            title={tt('history.archive')}
+            aria-label={tt('history.archive')}
+            {...(spec.attrs.archive ?? {})}
+            onClick={() => { spec.onArchive(true) }}
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2 3.2h12" /><path d="M3.2 3.2v8.6a1.2 1.2 0 0 0 1.2 1.2h7.2a1.2 1.2 0 0 0 1.2-1.2V3.2" /><path d="M6.4 6.6h3.2" /></svg>
+          </button>
+        )}
+        <button
+          type="button"
+          className={css.historyIconAction}
+          data-danger
+          disabled={spec.busy === true}
+          title={tt('history.delete')}
+          aria-label={tt('history.delete')}
+          {...spec.attrs.delete}
+          onClick={spec.onDelete}
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 4.5h11" /><path d="M6 4.5V3.2a.7.7 0 0 1 .7-.7h2.6a.7.7 0 0 1 .7.7v1.3" /><path d="M4.3 4.5l.6 8.1a1 1 0 0 0 1 .9h4.2a1 1 0 0 0 1-.9l.6-8.1" /><path d="M6.7 7v4M9.3 7v4" /></svg>
+        </button>
+      </span>
+    </div>
+  )
+
+  const canvasGlyph = (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1.8" y="2.6" width="5.4" height="4.4" rx="1" />
+      <rect x="8.8" y="2.6" width="5.4" height="4.4" rx="1" />
+      <rect x="1.8" y="9" width="12.4" height="4.4" rx="1" />
+      <path d="M7.2 4.8h1.6" />
+    </svg>
+  )
+
+  const chatGlyph = (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M2.4 4.2a1.4 1.4 0 0 1 1.4-1.4h8.4a1.4 1.4 0 0 1 1.4 1.4v5.2a1.4 1.4 0 0 1-1.4 1.4H7.4L4 12.9v-2.1h-.2a1.4 1.4 0 0 1-1.4-1.4z" />
+      <path d="M5.6 6h4.8M5.6 8h3" />
+    </svg>
+  )
+
   const renderCanvasRow = (project: CanvasSummary, archived: boolean): ReactNode => {
     const title = project.title.trim() === '' ? tt('canvas.untitled') : project.title.trim()
     const busy = canvasBusyId === project.id
@@ -2972,87 +3185,80 @@ export function ImageGenPanel(props: {
         : { key: 'archive', label: tt('history.archive'), disabled: busy, run: () => { void archiveCanvasProject(project, true) } },
       { key: 'delete', label: tt('history.delete'), danger: true, disabled: busy, run: () => { void removeCanvasProject(project) } },
     ]
-    return (
-      <div
-        key={project.id}
-        className={css.historyItem}
-        data-kind="canvas"
-        data-archived={archived ? '' : undefined}
-        data-canvas-busy={busy ? '' : undefined}
-        ref={contextMenuFor(items)}
-      >
-        <button type="button" className={css.historyMain} data-canvas-row={project.id} onClick={() => { openCanvasProject(project.id) }}>
-          <span className={css.canvasRowGlyph} aria-hidden="true">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="1.8" y="2.6" width="5.4" height="4.4" rx="1" />
-              <rect x="8.8" y="2.6" width="5.4" height="4.4" rx="1" />
-              <rect x="1.8" y="9" width="12.4" height="4.4" rx="1" />
-              <path d="M7.2 4.8h1.6" />
-            </svg>
-          </span>
-          <span className={css.historyInfo}>
-            <span className={css.historyPrompt}>{title}</span>
-            <span className={css.historyMeta}>
-              {tt('history.canvasMeta', { count: project.nodeCount })}
-              {' · '}{formatTime(project.updatedAt)}
-            </span>
-          </span>
-        </button>
-        <span className={css.historyActions}>
-          {archived ? (
-            <button
-              type="button"
-              className={css.historyIconAction}
-              disabled={busy}
-              title={tt('history.unarchive')}
-              aria-label={tt('history.unarchive')}
-              data-canvas-unarchive=""
-              onClick={() => { void archiveCanvasProject(project, false) }}
-            >
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 6.5h11" /><path d="M3.6 6.5l.7 6.4a1 1 0 0 0 1 .9h5.4a1 1 0 0 0 1-.9l.7-6.4" /><path d="M8 9.4V2.9" /><path d="M5.4 5.4L8 2.8l2.6 2.6" /></svg>
-            </button>
-          ) : (
-            <button
-              type="button"
-              className={css.historyIconAction}
-              data-active={project.favorite === true ? '' : undefined}
-              disabled={busy}
-              title={project.favorite === true ? tt('history.canvasUnfavorite') : tt('history.canvasFavorite')}
-              aria-label={project.favorite === true ? tt('history.canvasUnfavorite') : tt('history.canvasFavorite')}
-              data-canvas-favorite=""
-              onClick={() => { void favoriteCanvasProject(project) }}
-            >
-              <svg viewBox="0 0 16 16" width="14" height="14" fill={project.favorite === true ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" aria-hidden="true"><path d="M8 2.2l1.7 3.6 3.9.5-2.9 2.7.7 3.9L8 11l-3.4 1.9.7-3.9L2.4 6.3l3.9-.5z" /></svg>
-            </button>
-          )}
-          {archived ? null : (
-            <button
-              type="button"
-              className={css.historyIconAction}
-              disabled={busy}
-              title={tt('history.archive')}
-              aria-label={tt('history.archive')}
-              data-canvas-archive=""
-              onClick={() => { void archiveCanvasProject(project, true) }}
-            >
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2 3.2h12" /><path d="M3.2 3.2v8.6a1.2 1.2 0 0 0 1.2 1.2h7.2a1.2 1.2 0 0 0 1.2-1.2V3.2" /><path d="M6.4 6.6h3.2" /></svg>
-            </button>
-          )}
-          <button
-            type="button"
-            className={css.historyIconAction}
-            data-danger
-            disabled={busy}
-            title={tt('history.delete')}
-            aria-label={tt('history.delete')}
-            data-canvas-delete=""
-            onClick={() => { void removeCanvasProject(project) }}
-          >
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 4.5h11" /><path d="M6 4.5V3.2a.7.7 0 0 1 .7-.7h2.6a.7.7 0 0 1 .7.7v1.3" /><path d="M4.3 4.5l.6 8.1a1 1 0 0 0 1 .9h4.2a1 1 0 0 0 1-.9l.6-8.1" /><path d="M6.7 7v4M9.3 7v4" /></svg>
-          </button>
-        </span>
-      </div>
-    )
+    return renderShelfRow({
+      rowKey: project.id,
+      kind: 'canvas',
+      glyph: canvasGlyph,
+      title,
+      meta: (
+        <>
+          {tt('history.canvasMeta', { count: project.nodeCount })}
+          {' · '}{formatTime(project.updatedAt)}
+        </>
+      ),
+      busy,
+      favorite: project.favorite === true,
+      archived,
+      attrs: {
+        row: { 'data-canvas-row': project.id },
+        favorite: { 'data-canvas-favorite': '' },
+        archive: { 'data-canvas-archive': '' },
+        unarchive: { 'data-canvas-unarchive': '' },
+        delete: { 'data-canvas-delete': '' },
+      },
+      items,
+      onOpen: () => { openCanvasProject(project.id) },
+      onFavorite: () => { void favoriteCanvasProject(project) },
+      onArchive: next => { void archiveCanvasProject(project, next) },
+      onDelete: () => { void removeCanvasProject(project) },
+    })
+  }
+
+  const renderThreadRow = (row: ShellThreadRow): ReactNode => {
+    const flag = shelfFlags[row.id]
+    const favorite = flag?.favorite === true
+    const archived = flag?.archived === true
+    const items: RowMenuItem[] = [
+      { key: 'open', label: tt('menu.open'), run: () => { openStudioThread(row.id) } },
+      { key: 'rename', label: tt('history.rename'), run: () => { renameStudioThread(row) } },
+      ...archived ? [] : [{
+        key: 'favorite',
+        label: favorite ? tt('history.unfavorite') : tt('history.favorite'),
+        run: () => { setShelfFlag(row.id, { favorite: !favorite }) },
+      }],
+      { key: 'reveal', label: tt('history.revealData'), run: () => { void api.openDataFolder() } },
+      archived
+        ? { key: 'unarchive', label: tt('history.unarchive'), run: () => { setShelfFlag(row.id, { archived: false }) } }
+        : { key: 'archive', label: tt('history.archive'), run: () => { setShelfFlag(row.id, { archived: true }) } },
+      { key: 'delete', label: tt('history.delete'), danger: true, run: () => { deleteStudioThread(row) } },
+    ]
+    return renderShelfRow({
+      rowKey: row.id,
+      kind: 'studio',
+      glyph: chatGlyph,
+      title: row.title,
+      meta: (
+        <>
+          {row.count === 0 ? tt('history.threadEmpty') : tt('history.threadMeta', { count: row.count })}
+          {' · '}{formatTime(row.at)}
+        </>
+      ),
+      active: row.id === activeStudioThread,
+      favorite,
+      archived,
+      attrs: {
+        row: { 'data-studio-thread-row': row.id },
+        favorite: { 'data-studio-thread-favorite': '' },
+        archive: { 'data-studio-thread-archive': '' },
+        unarchive: { 'data-studio-thread-unarchive': '' },
+        delete: { 'data-studio-thread-delete': '' },
+      },
+      items,
+      onOpen: () => { openStudioThread(row.id) },
+      onFavorite: () => { setShelfFlag(row.id, { favorite: !favorite }) },
+      onArchive: next => { setShelfFlag(row.id, { archived: next }) },
+      onDelete: () => { deleteStudioThread(row) },
+    })
   }
 
   // Render history into the shell sidebar so it remains a separate navigation
@@ -3095,9 +3301,7 @@ export function ImageGenPanel(props: {
               void toggleArchivedHistory()
             }}
           >
-            {tt('history.archived')}{(historyScope === 'canvases' ? canvasArchivedProjects.length : archivedHistory.length) === 0
-              ? ''
-              : ` ${String(historyScope === 'canvases' ? canvasArchivedProjects.length : archivedHistory.length)}`}
+            {tt('history.archived')}{archivedShelfCount === 0 ? '' : ` ${String(archivedShelfCount)}`}
           </button>
           {historyScope === 'generations' && !historyArchivedOpen && unifiedHistory.length > 0 ? (
             <button type="button" className={css.historyClear} data-history-clear="" onClick={() => { void clearHistory() }}>
@@ -3135,50 +3339,9 @@ export function ImageGenPanel(props: {
 
       {/* 普通生图 is one long conversation, so its thread list belongs here
           rather than in a second column inside the studio. */}
-      {historyScope !== 'generations' || studioThreads.length === 0 || workspace !== 'studio' ? null : (
+      {historyScope !== 'generations' || studioRowsLive.length === 0 || workspace !== 'studio' ? null : (
         <div className={css.historyList} data-studio-threads="">
-          {studioThreads.map(row => (
-            <div
-              key={row.id}
-              className={css.historyItem}
-              data-active={row.id === activeStudioThread ? '' : undefined}
-              data-kind="studio"
-            >
-              <button
-                type="button"
-                className={css.historyMain}
-                onClick={() => {
-                  setWorkspace('studio')
-                  window.dispatchEvent(new CustomEvent('dsh-imagegen-studio:studio-select', { detail: { threadId: row.id } }))
-                }}
-              >
-                <span className={css.historyInfo}>
-                  <span className={css.historyPrompt}>{row.title}</span>
-                  <span className={css.historyMeta}>{row.count === 0 ? '空对话' : `${String(row.count)} 条生成`}</span>
-                </span>
-              </button>
-              <span className={css.historyActions}>
-                <button
-                  type="button"
-                  className={css.historyIconAction}
-                  data-danger
-                  title={tt('history.delete')}
-                  aria-label={tt('history.delete')}
-                  data-studio-thread-delete=""
-                  onClick={() => {
-                    window.dispatchEvent(new CustomEvent('dsh-imagegen-studio:studio-delete', { detail: { threadId: row.id } }))
-                    // The workspace owns the payload and persists it debounced,
-                    // so re-read once the write has landed rather than trusting
-                    // the optimistic row removal to survive its refresh.
-                    setStudioThreads(previous => previous.filter(item => item.id !== row.id))
-                    window.setTimeout(() => { setStudioThreads(readShellThreads()) }, 700)
-                  }}
-                >
-                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 4.5h11" /><path d="M6 4.5V3.2a.7.7 0 0 1 .7-.7h2.6a.7.7 0 0 1 .7.7v1.3" /><path d="M4.3 4.5l.6 8.1a1 1 0 0 0 1 .9h4.2a1 1 0 0 0 1-.9l.6-8.1" /><path d="M6.7 7v4M9.3 7v4" /></svg>
-                </button>
-              </span>
-            </div>
-          ))}
+          {studioRowsLive.map(row => renderThreadRow(row))}
         </div>
       )}
 
@@ -3203,10 +3366,11 @@ export function ImageGenPanel(props: {
           )}
         </div>
       ) : historyArchivedOpen ? (
-        archivedHistory.length === 0 ? (
+        archivedHistory.length === 0 && studioRowsArchived.length === 0 ? (
           <div className={css.historyEmpty}>{tt('history.archivedEmpty')}</div>
         ) : (
           <div className={css.historyList} data-history-archived="">
+            {studioRowsArchived.map(row => renderThreadRow(row))}
             {groupHistoryEntries(archivedHistory).map(group => {
               const head = group.entries[0]!
               return (

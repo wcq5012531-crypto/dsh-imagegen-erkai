@@ -452,3 +452,19 @@ vendor 副本已同步 1.16.10。
 
 验证：`npx tsc --noEmit`、`npm run build`、`node scripts/smoke.mjs` 全绿、
 `node scripts/verify-ui-contracts.mjs` 全绿。
+
+## 21. 会话行与画布行同规格（1.16.13）
+
+用户的原话：为什么普通生图里只有一个删除图标？——这不是个例，是二开时缺一套全局设计规则。
+
+1. **规则。** 左栏的「项目行」只有两种：会话与画布。它们回答同一个问题（我刚做的东西在哪），
+   所以结构、图标位、动作集必须一样，差异只允许在「打开去哪」和「本体数据从哪来」。
+2. **落法。** `src/client/ImageGenPanel.tsx` 里 `renderShelfRow(spec)` 是唯一渲染入口，
+   `renderThreadRow` 与 `renderCanvasRow` 各自只提供数据与回调。行的能力清单写进
+   `data-shelf-actions`（未归档为 `open rename favorite archive delete`），冒烟据此断言。
+3. **会话的动作从哪来。** 收藏/归档不存在宿主存储里，落在本地 `dsh-imagegen-studio:shelf-flags`
+   （id → { favorite, archived }）；改名走 `studio-rename` 事件，由工作室写它自己那份 payload。
+4. **命名。** 导航「普通生图」改为「图片生成」；货架叫「生成记录 / 画布」，不借用工作台名字。
+
+验证：`npx tsc --noEmit`、`npm run build`、`node scripts/smoke.mjs`（新增 action-cluster 断言）、
+`node scripts/verify-ui-contracts.mjs`。

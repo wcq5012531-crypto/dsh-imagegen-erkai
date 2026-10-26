@@ -5513,14 +5513,14 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     // Gallery keeps the sidebar history visible, and selecting one history
     // group returns the center workspace to text-to-image.
     const tablistButtons = [...view.querySelectorAll('[role="tablist"] button')]
-    // The fork collapsed the top nav to three entries -- studio (普通生图),
+    // The fork collapsed the top nav to three entries -- studio (图片生成),
     // 素材库 and 无限画布 -- and removed the ecommerce and PPT entries
     // (CHANGELOG "面板收敛为三个标签"). Those workspaces still exist in the
     // source (a product set restored from history reopens the ecommerce canvas)
     // but nothing in the nav leads to them, so the suite pins the trimmed nav:
     // a stray re-introduction is caught here instead of by a user.
     assert.equal(tablistButtons.length, 3, 'top nav keeps the three entries the fork ships')
-    const normalSwitch = tablistButtons.find(button => button.textContent?.includes('普通生图'))
+    const normalSwitch = tablistButtons.find(button => button.textContent?.includes('图片生成'))
     const canvasSwitch = tablistButtons.find(button => button.textContent?.includes('无限画布'))
     assert.ok(normalSwitch !== undefined, 'normal entry is present')
     assert.ok(tablistButtons.some(button => button.textContent?.includes('素材库')), 'gallery entry is present')
@@ -5537,7 +5537,7 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     canvasSwitch.click()
     await new Promise(resolve => setTimeout(resolve, 50))
     assert.ok(view.querySelector('[data-canvas-workspace]') !== null, 'the canvas entry mounts the canvas workspace')
-    const backToNormal = [...view.querySelectorAll('[role="tablist"] button')].find(button => button.textContent?.includes('普通生图'))
+    const backToNormal = [...view.querySelectorAll('[role="tablist"] button')].find(button => button.textContent?.includes('图片生成'))
     assert.ok(backToNormal !== undefined, 'the nav survives a workspace switch')
     backToNormal.click()
     await new Promise(resolve => setTimeout(resolve, 50))
@@ -5545,7 +5545,7 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     // switch is detached. Anything that needs to "leave and come back" goes
     // through these two helpers, which re-query every time.
     const openNormal = async () => {
-      const entry = [...view.querySelectorAll('[role="tablist"] button')].find(button => button.textContent?.includes('普通生图'))
+      const entry = [...view.querySelectorAll('[role="tablist"] button')].find(button => button.textContent?.includes('图片生成'))
       assert.ok(entry !== undefined, 'the normal entry stays reachable')
       entry.click()
       await new Promise(resolve => setTimeout(resolve, 50))
@@ -6073,9 +6073,14 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     if (canvasRow !== null) {
       assert.ok(histHost.querySelector('[data-canvas-archive]') !== null, 'a canvas row can be archived from the list')
       assert.ok(histHost.querySelector('[data-canvas-favorite]') !== null, 'a canvas row keeps its favourite action')
+      // 会话行与画布行由同一个 renderShelfRow 渲染；能力清单写进 DOM，
+      // 于是「两种行必须同规格」可被断言，而不是靠人眼比对截图。
+      const shelfRow = canvasRow.closest('[data-shelf-actions]')
+      assert.ok(shelfRow !== null, 'a shelf row advertises its action cluster')
+      assert.equal(shelfRow.getAttribute('data-shelf-actions'), 'open rename favorite archive delete', 'the shelf action cluster is the full one')
     }
-    assert.ok(scopeTab('generations').textContent.includes('普通生图'), 'the stills shelf carries the workbench name')
-    assert.ok(scopeTab('canvases').textContent.includes('无限画布'), 'the canvas shelf carries the workbench name')
+    assert.ok(scopeTab('generations').textContent.includes('生成记录'), 'the stills shelf names what it holds, not the workbench')
+    assert.ok(scopeTab('canvases').textContent.includes('画布'), 'the canvas shelf names what it holds')
     await clickScope('generations')
     await waitUntil(() => histHost.querySelector('[data-history-new]') !== null, 'the stills shelf comes back with its own new-item action')
     assert.ok(histHost.querySelector('[data-history-archived-toggle]') !== null, 'the archive toggle is still there for stills')

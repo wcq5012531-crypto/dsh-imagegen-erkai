@@ -613,13 +613,24 @@ export function StudioWorkspace({ active }: StudioWorkspaceProps): React.ReactEl
       // `threads[0]`, so the composer never lands on a dangling id.
       setThreads(current => current.filter(entry => entry.id !== target))
     }
+    // 侧栏给会话改名时不碰 payload 结构，只把 title 换掉，让这一份（唯一一份）
+    // 真正落盘的数据跟着变；侧栏随后会重新读回它。
+    const onRename = (event: Event): void => {
+      const detail = (event as CustomEvent<{ threadId?: string; title?: string }>).detail
+      const target = detail?.threadId
+      const title = detail?.title?.trim() ?? ''
+      if (typeof target !== 'string' || target === '' || title === '') return
+      setThreads(current => current.map(entry => entry.id === target ? { ...entry, title } : entry))
+    }
     window.addEventListener('dsh-imagegen-studio:studio-select', onSelect)
     window.addEventListener('dsh-imagegen-studio:studio-new', onNew)
     window.addEventListener('dsh-imagegen-studio:studio-delete', onDelete)
+    window.addEventListener('dsh-imagegen-studio:studio-rename', onRename)
     return () => {
       window.removeEventListener('dsh-imagegen-studio:studio-select', onSelect)
       window.removeEventListener('dsh-imagegen-studio:studio-new', onNew)
       window.removeEventListener('dsh-imagegen-studio:studio-delete', onDelete)
+      window.removeEventListener('dsh-imagegen-studio:studio-rename', onRename)
     }
   }, [])
 
