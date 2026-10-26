@@ -3069,13 +3069,13 @@ export function ImageGenPanel(props: {
             className={css.historyClear}
             data-history-new=""
             data-canvas-new={historyScope === 'canvases' ? '' : undefined}
-            title={historyScope === 'canvases' ? tt('canvas.newHint') : tt('canvas.newHint')}
+            title={historyScope === 'canvases' ? tt('history.newCanvas') : tt('canvas.newHint')}
             onClick={() => {
               if (historyScope === 'canvases') { void createCanvasProject(); return }
               startNewCreation()
             }}
           >
-            ＋ {historyScope === 'canvases' ? tt('history.newCanvas') : tt('history.newThread')}
+            ＋ {tt('history.newThread')}
           </button>
           <button
             type="button"
@@ -3128,7 +3128,6 @@ export function ImageGenPanel(props: {
             }}
           >
             {scope === 'generations' ? tt('history.scopeGenerations') : tt('history.scopeCanvases')}
-            {scope === 'canvases' && canvasProjects.length > 0 ? ` ${String(canvasProjects.length)}` : ''}
           </button>
         ))}
       </div>
