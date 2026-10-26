@@ -262,6 +262,10 @@ export interface CanvasBackend {
   save: (document: CanvasDocument, expectedRevision?: number) => Promise<Awaited<ReturnType<CanvasStore['save']>>>
   remove: (id: string) => Promise<Awaited<ReturnType<CanvasStore['remove']>>>
   setFavorite?: (id: string, favorite: boolean) => Promise<Awaited<ReturnType<CanvasStore['setFavorite']>>>
+  /** Archive flag. Optional so older test backends keep working. */
+  setArchived?: (id: string, archived: boolean) => Promise<Awaited<ReturnType<CanvasStore['setArchived']>>>
+  /** Rename (page title + index title). Optional for the same reason. */
+  rename?: (id: string, title: string) => Promise<Awaited<ReturnType<CanvasStore['rename']>>>
   putImage: (input: CanvasImageInput) => Promise<Awaited<ReturnType<CanvasStore['putImage']>>>
   readAsset: (file: string) => Promise<Awaited<ReturnType<CanvasStore['readAsset']>>>
   /** File assets (the canvas file node). Optional so older test backends work. */
@@ -1785,6 +1789,42 @@ export function makeRoutes(deps: ImageGenRoutesDeps): WebRoute[] {
         }
         try { writeJson(res, 200, { ok: true, projects: await canvas.setFavorite(id, favorite) }) }
         catch (error) { writeJson(res, 200, { ok: false, code: 'canvas-favorite-failed', message: messageOf(error) }) }
+      },
+    },
+    // --------------------------------------------------- canvas archive
+    {
+      kind: 'exact',
+      path: CANVAS_API.archive,
+      handler: async (req, res) => {
+        if (!guard(req, res, 'POST')) return
+        const body = await readJsonBody(req)
+        const id = typeof body?.id === 'string' ? body.id.trim() : ''
+        const archived = body?.archived !== false
+        if (id === '') { writeJson(res, 200, { ok: false, code: 'bad-request', message: 'canvas id is required' }); return }
+        if (canvas.setArchived === undefined) {
+          writeJson(res, 200, { ok: false, code: 'canvas-archive-unsupported', message: '当前画布后端不支持归档' })
+          return
+        }
+        try { writeJson(res, 200, { ok: true, projects: await canvas.setArchived(id, archived) }) }
+        catch (error) { writeJson(res, 200, { ok: false, code: 'canvas-archive-failed', message: messageOf(error) }) }
+      },
+    },
+    // ---------------------------------------------------- canvas rename
+    {
+      kind: 'exact',
+      path: CANVAS_API.rename,
+      handler: async (req, res) => {
+        if (!guard(req, res, 'POST')) return
+        const body = await readJsonBody(req)
+        const id = typeof body?.id === 'string' ? body.id.trim() : ''
+        const title = typeof body?.title === 'string' ? body.title : ''
+        if (id === '') { writeJson(res, 200, { ok: false, code: 'bad-request', message: 'canvas id is required' }); return }
+        if (canvas.rename === undefined) {
+          writeJson(res, 200, { ok: false, code: 'canvas-rename-unsupported', message: '当前画布后端不支持重命名' })
+          return
+        }
+        try { writeJson(res, 200, { ok: true, projects: await canvas.rename(id, title) }) }
+        catch (error) { writeJson(res, 200, { ok: false, code: 'canvas-rename-failed', message: messageOf(error) }) }
       },
     },
     // ------------------------------------------------ canvas asset upload

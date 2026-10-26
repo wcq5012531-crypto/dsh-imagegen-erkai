@@ -8,7 +8,7 @@
 export const IMAGEGEN_SETTINGS_NAMESPACE = 'dsh-imagegen-studio'
 
 /** Published package version shared by the host updater and the client UI. */
-export const PLUGIN_VERSION = '1.16.11'
+export const PLUGIN_VERSION = '1.16.12'
 
 /** Same-origin route family (loopback-only, mirroring the dsh-ssh fence). */
 export const SETTINGS_API = {
@@ -260,6 +260,9 @@ export const CANVAS_API = {
   save: '/api/dsh-imagegen-studio/canvas/save',
   remove: '/api/dsh-imagegen-studio/canvas/remove',
   favorite: '/api/dsh-imagegen-studio/canvas/favorite',
+  archive: '/api/dsh-imagegen-studio/canvas/archive',
+  /** Rename a canvas from the list (page title and index title together). */
+  rename: '/api/dsh-imagegen-studio/canvas/rename',
   assetUpload: '/api/dsh-imagegen-studio/canvas/asset/upload',
   assetImport: '/api/dsh-imagegen-studio/canvas/asset/import',
   asset: '/api/dsh-imagegen-studio/canvas/asset',
@@ -1576,6 +1579,12 @@ export interface CanvasSummary {
   updatedAt: number
   /** User pinned this canvas to the favorites group. */
   favorite?: boolean
+  /**
+   * The canvas sits in the archive: it keeps its nodes and stays one click from
+   * coming back, it only leaves the everyday list. Mirrors `HistoryEntry.archived`
+   * so the two shelves of the same column behave identically.
+   */
+  archived?: boolean
 }
 
 /** Metadata shared by the ecommerce product-set workflow. */

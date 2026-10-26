@@ -1,7 +1,7 @@
 {
   "name": "dsh-imagegen-studio",
   "description": "dsh-imagegen-studio — AI image + video studio plugin for the dsh web GUI. A fork of @q253595422/dsh-imagegen-video that keeps the whole image pipeline, the video pipeline and the infinite canvas, and adds (1) a user-defined protocol adapter layer so any gateway model can be wired up by pasting a cURL command, with per-model size / aspect / duration / extra-field mapping, request templating, response path extraction and dry-run preview; (2) one-click replicate (reference image or clip to prompt + parameters + render); (3) one-click duration continuation (tail-frame chaining to extend a clip past the provider cap, with optional crossfade).",
-  "version": "1.16.11",
+  "version": "1.16.12",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

@@ -428,3 +428,27 @@ vendor 副本已同步 1.16.10。
    变成游离节点（所以要重新 query 再点）。
 
 验证：`npx tsc --noEmit`、`npm run build`（`lib/client.js` 2,765,851 B）、`node scripts/smoke.mjs` 全绿。
+
+## 20. 左栏两个货架完全统一（1.16.12）
+
+用户对着五张截图逐条提的问题，归结起来是一件事：**历史侧栏的两个货架长得不像一家人**。
+
+1. **头部统一。** 生成记录有「＋新建 / 已归档」，画布货架只有「＋新建画布」。现在两边都在位：
+   画布也能归档（`CanvasSummary.archived`，宿主 `CANVAS_API.archive`），也能切换查看已归档。
+2. **筛选还给素材库。** 左栏原来还有搜索框和「全部 / 全部模型 / 全部比例」三个下拉，
+   和素材库的筛选重复。全删——左栏只回答「我刚做的东西在哪」，找东西去素材库。
+3. **命名与排序。** `workspace.normal` 从「普通生图」改成「图片生成」，导航顺序改为
+   图片生成 / 无限画布 / 素材库（素材库最后）。
+4. **画布管理能力对齐。** 画布行右键菜单与生成行共用 `src/client/RowMenu.tsx`：
+   打开 / 在画布中打开 / 重命名 / 收藏 / 归档 / 删除。画布顶栏的「删除画布」按钮删掉——
+   它调用的是文件菜单里的删除，点下去没反应，是设计的错；「另存为副本」留下并接入 i18n
+   （`canvas.duplicateProject` / `canvas.duplicateProjectHint`）。
+5. **重命名。** 宿主 `CANVAS_API.rename` 走 `canvas-store.rename()`，空标题回落到「未命名画布」；
+   画布行菜单里的「重命名」用 `window.prompt` 拿新名字——与素材库分类重命名同一套交互。
+
+踩到的坑：`ImageGenPanel` 的 `workspace` 跟随 effect 会在切到画布时把货架也切到画布，
+所以 E1 里做生成行断言前要先显式点回「生成记录」（`data-history-scope="generations"`），
+而且切货架会重渲染，之前抓到的行节点会游离，必须重新 query。
+
+验证：`npx tsc --noEmit`、`npm run build`、`node scripts/smoke.mjs` 全绿、
+`node scripts/verify-ui-contracts.mjs` 全绿。

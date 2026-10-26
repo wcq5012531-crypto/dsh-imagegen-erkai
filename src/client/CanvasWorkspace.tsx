@@ -1779,7 +1779,6 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
 
   const imageFileRef = useRef<HTMLInputElement>(null)
   const [renamingTitle, setRenamingTitle] = useState(false)
-  const [confirmDeleteProject, setConfirmDeleteProject] = useState(false)
   const [saveState, setSaveState] = useState<'loading' | 'saved' | 'saving' | 'error'>('loading')
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -4535,8 +4534,11 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
         }
         return
       }
-      const created = list[0] === undefined ? await api.canvasCreate(tt('canvas.untitled')) : null
-      const first = created === null ? await api.canvasRead(list[0]!.id) : seedDocument(created)
+      // 归档的画布不参与「开局落哪一张」的挑选：它们属于左栏的归档区，
+      // 只有用户明确点名（上面那条请求路径）时才打开。
+      const visible = list.filter(project => project.archived !== true)
+      const created = visible[0] === undefined ? await api.canvasCreate(tt('canvas.untitled')) : null
+      const first = created === null ? await api.canvasRead(visible[0]!.id) : seedDocument(created)
       if (disposed) return
       setProjects(created === null ? list : [summaryOf(first)])
       setDocument(normalizeConfigNodeSizes(first))
@@ -5440,8 +5442,11 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
   }, [api, newCanvas, projects, selectProject])
 
   const currentProject = projects.find(project => project.id === document?.id)
-  const favoriteProjects = projects.filter(project => project.favorite === true)
-  const otherProjects = projects.filter(project => project.favorite !== true)
+  // Archived canvases live in the left column's archive: the canvas surface keeps
+  // them out of its switcher so the archive means the same thing on both shelves.
+  const visibleProjects = projects.filter(project => project.archived !== true)
+  const favoriteProjects = visibleProjects.filter(project => project.favorite === true)
+  const otherProjects = visibleProjects.filter(project => project.favorite !== true)
   const currentFavorite = currentProject?.favorite === true
 
   const toggleCurrentFavorite = useCallback(async (): Promise<void> => {
@@ -5453,31 +5458,6 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
       setError(caught instanceof Error ? caught.message : String(caught))
     }
   }, [api, currentFavorite])
-
-  const removeCurrentProject = useCallback(async (): Promise<void> => {
-    const current = documentRef.current
-    if (current === null) return
-    try {
-      const remaining = await api.canvasRemove(current.id)
-      // The canvas is gone, so a pending edit has nothing left to write to:
-      // record the live document as reconciled BEFORE the follow-up project
-      // switch, whose flush would otherwise save it straight back onto the
-      // deleted canvas.
-      syncedRef.current = JSON.stringify(documentRef.current ?? current)
-      setConfirmDeleteProject(false)
-      const nextId = remaining[0]?.id
-      if (nextId === undefined) {
-        const created = await api.canvasCreate(tt('canvas.untitled'))
-        const created2 = seedDocument(created)
-        setProjects([summaryOf(created2)]); setDocument(created2)
-        syncedRef.current = JSON.stringify(created); setSaveState('saved')
-      } else {
-        setProjects(remaining)
-        await selectProject(nextId)
-      }
-      setSelectedIds(new Set()); setSelectedConnectionId(null)
-    } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)) }
-  }, [api, selectProject, seedDocument])
 
   // -------------------------------------------------------------- derived
 
@@ -6449,9 +6429,6 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
         disabled={document === null}
         onClick={() => { void toggleCurrentFavorite() }}
       />
-      <IconButton name="deleteProject" label={confirmDeleteProject ? tt('canvas.deleteCanvasConfirm') : tt('canvas.deleteCanvas')} active={confirmDeleteProject} disabled={document === null} onClick={() => {
-        if (confirmDeleteProject) { void removeCurrentProject() } else { setConfirmDeleteProject(true); window.setTimeout(() => setConfirmDeleteProject(false), 3000) }
-      }} />
       {renamingTitle && document !== null
         ? <input
             className={css.titleInput}
@@ -6464,7 +6441,7 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
             onKeyDown={event => { if (event.key === 'Enter' || event.key === 'Escape') setRenamingTitle(false) }}
           />
         : <button type="button" className={css.titleButton} onClick={() => setRenamingTitle(true)} title={tt('canvas.renameHint')}>{document?.title ?? ''}</button>}
-      <button type="button" className={css.titleButton} title="把当前画布另存为一个独立副本" onClick={() => { void duplicateProject() }}>另存为副本</button>
+      <button type="button" className={css.titleButton} title={tt('canvas.duplicateProjectHint')} onClick={() => { void duplicateProject() }}>{tt('canvas.duplicateProject')}</button>
       <span className={css.topBarSpacer} />
       <span className={css.saveState} data-state={saveState}>{saveState === 'saving' ? tt('canvas.saving') : saveState === 'saved' ? tt('canvas.saved') : saveState === 'error' ? tt('canvas.saveFailed') : tt('canvas.loading')}</span>
     </header>

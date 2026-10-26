@@ -465,6 +465,16 @@ export class ImageGenApi {
     return (await readEnvelope<{ ok: true; projects: CanvasSummary[] }>(response)).projects
   }
 
+  async canvasArchive(id: string, archived: boolean): Promise<CanvasSummary[]> {
+    const response = await fetch(CANVAS_API.archive, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, archived }) })
+    return (await readEnvelope<{ ok: true; projects: CanvasSummary[] }>(response)).projects
+  }
+
+  async canvasRename(id: string, title: string): Promise<CanvasSummary[]> {
+    const response = await fetch(CANVAS_API.rename, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, title }) })
+    return (await readEnvelope<{ ok: true; projects: CanvasSummary[] }>(response)).projects
+  }
+
   async canvasUpload(dataUrl: string, width: number, height: number, meta: { origin?: string; originId?: string; entryId?: string; imageIndex?: number } = {}): Promise<CanvasAssetRef> {
     const response = await fetch(CANVAS_API.assetUpload, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dataUrl, width, height, ...meta }) })
     return (await readEnvelope<{ ok: true; asset: CanvasAssetRef }>(response)).asset

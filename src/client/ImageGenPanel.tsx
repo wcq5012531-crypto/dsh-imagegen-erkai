@@ -8,7 +8,7 @@
  * a platform module) so the studio matches the dsh shell look by construction.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Button, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
@@ -972,14 +972,8 @@ export function ImageGenPanel(props: {
   // Clips live in their own host store; the sidebar merges them with the image
   // history at render time (see UnifiedHistoryRow).
   const [videoHistory, setVideoHistory] = useState<VideoHistoryEntry[]>([])
-  const [historyQuery, setHistoryQuery] = useState('')
   const [studioThreads, setStudioThreads] = useState<ShellThreadRow[]>(() => readShellThreads())
   const [activeStudioThread, setActiveStudioThread] = useState<string>('')
-  const [historyModelFilter, setHistoryModelFilter] = useState('all')
-  const [historyRatioFilter, setHistoryRatioFilter] = useState('all')
-  /** 'all' | 'image' | 'video' — clips and images share one list, so the only
-   *  way to see just one kind used to be scrolling past the other. */
-  const [historyKindFilter, setHistoryKindFilter] = useState<'all' | 'image' | 'video'>('all')
   const [preview, setPreview] = useState<{ images: GeneratedImage[]; index: number } | null>(null)
   /** The gallery clip open in the full-screen player (images use `preview`). */
   const [galleryClip, setGalleryClip] = useState<HistoryEntry | null>(null)
@@ -1228,42 +1222,23 @@ export function ImageGenPanel(props: {
   /**
    * The sidebar's single, time-ordered list of every generation.
    *
-   * Clips and images share one row shape here, so the filters, the empty state
-   * and the "clear" action all work across both without either branch knowing
-   * about the other's store.
+   * Clips and images share one row shape here, so the empty state and the
+   * "clear" action work across both without either branch knowing about the
+   * other's store. There is deliberately no search box or filter row: the list
+   * is already newest-first and short enough to scan, and those controls made
+   * the left column the only surface in the plugin with a filter bar.
    */
   const unifiedHistory = useMemo<UnifiedHistoryRow[]>(() => {
-    const query = historyQuery.trim().toLocaleLowerCase()
-    const imageRows = groupHistoryEntries(history).map(imageRowOf)
-    const videoRows = videoHistory.map(videoRowOf)
-    const matches = (row: UnifiedHistoryRow, extra: string): boolean => {
-      if (historyKindFilter !== 'all' && row.kind !== historyKindFilter) return false
-      if (query !== '' && !`${row.prompt} ${row.models.join(' ')}`.toLocaleLowerCase().includes(query)) return false
-      if (historyModelFilter !== 'all' && !row.models.includes(historyModelFilter)) return false
-      if (historyRatioFilter !== 'all' && extra !== historyRatioFilter) return false
-      return true
-    }
-    // The ratio filter compares against each kind's own ratio vocabulary: an
-    // image size ('1:1', 'auto') and a clip aspect ratio ('16:9') are the same
-    // concept but stored differently.
-    const rows = [
-      ...imageRows.filter(row => matches(row, normalizeSize(row.group!.entries[0]!.size))),
-      ...videoRows.filter(row => matches(row, row.entry!.aspectRatio)),
-    ]
     // Merge the two lists rather than re-sorting the combined set.
     //
-    // Both stores are already newest-first: each prepends its new entry. A
-    // merge therefore yields true chronological order while preserving the
-    // RELATIVE order inside each list — whereas sorting everything by
-    // createdAt would also reorder image rows against each other, which can
-    // change which item a click opens (comparison groups and product sets do
-    // not necessarily follow createdAt).
-    //
-    // Merge the FILTERED halves, not `imageRows` / `videoRows`: `rows` above is
-    // the only place the search box and the two filters are applied, so merging
-    // the raw arrays made all three controls silently no-ops.
-    const image = rows.filter(row => row.kind === 'image')
-    const video = rows.filter(row => row.kind === 'video')
+    // Both stores are already newest-first: each prepends its new entry. A merge
+    // therefore yields true chronological order while preserving the RELATIVE
+    // order inside each list — whereas sorting everything by createdAt would also
+    // reorder image rows against each other, which can change which item a click
+    // opens (comparison groups and product sets do not necessarily follow
+    // createdAt).
+    const image = groupHistoryEntries(history).map(imageRowOf)
+    const video = videoHistory.map(videoRowOf)
     const merged: UnifiedHistoryRow[] = []
     let left = 0
     let right = 0
@@ -1275,24 +1250,9 @@ export function ImageGenPanel(props: {
     while (left < image.length) merged.push(image[left++]!)
     while (right < video.length) merged.push(video[right++]!)
     return merged
-  }, [history, videoHistory, historyModelFilter, historyKindFilter, historyQuery, historyRatioFilter])
+  }, [history, videoHistory])
 
   /** Every model name appearing in either store, for the model filter. */
-  const historyModelOptions = useMemo(() => [
-    ...new Set([
-      ...history.flatMap(entry => modelsOfHistoryEntry(entry)),
-      ...videoHistory.map(entry => entry.model),
-    ]),
-  ], [history, videoHistory])
-
-  /** Every ratio appearing in either store, for the ratio filter. */
-  const historyRatioOptions = useMemo(() => [
-    ...new Set([
-      ...history.map(entry => normalizeSize(entry.size)),
-      ...videoHistory.map(entry => entry.aspectRatio),
-    ]),
-  ], [history, videoHistory])
-
   // Load the host-persisted history and gallery once, when the panel first
   // becomes visible. Keeping this out of boot prevents eager full-size image
   // requests while image generation is closed.
@@ -2911,8 +2871,55 @@ export function ImageGenPanel(props: {
     }
   }, [api])
 
-  const canvasFavoriteProjects = canvasProjects.filter(project => project.favorite === true)
-  const canvasOtherProjects = canvasProjects.filter(project => project.favorite !== true)
+  /**
+   * 把一张画布挪进/取出归档。
+   *
+   * 归档和执行删除共用一套忙标记：两件事都改画布名册，同时点只会在服务端互相
+   * 覆盖，用户看到的是「归档了又弹回来」；按行禁一次就够挡住它。
+   */
+  const archiveCanvasProject = useCallback(async (project: CanvasSummary, archived: boolean): Promise<void> => {
+    setCanvasBusyId(project.id)
+    try {
+      setCanvasProjects(await api.canvasArchive(project.id, archived))
+      setCanvasScopeError(null)
+    } catch (caught) {
+      setCanvasScopeError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setCanvasBusyId(null)
+    }
+  }, [api])
+
+  /**
+   * 在左栏里改画布名。
+   *
+   * WHY 用 prompt 而不是画布页头那条双击输入：改名的场景多半是「一堆未命名画布
+   * 排在列表里」，用户正看着列表，不该为了改名先跳进画布再找标题。宿主的 rename
+   * 路由会把页面标题和名册标题一起写，两个入口因此不会写出两种名字。
+   */
+  const renameCanvasProject = useCallback(async (project: CanvasSummary): Promise<void> => {
+    const current = project.title.trim() === '' ? tt('canvas.untitled') : project.title.trim()
+    const answer = window.prompt(tt('history.canvasRename'), current)
+    if (answer === null) return
+    const title = answer.trim()
+    if (title === '' || title === current) return
+    setCanvasBusyId(project.id)
+    try {
+      setCanvasProjects(await api.canvasRename(project.id, title))
+      setCanvasScopeError(null)
+    } catch (caught) {
+      setCanvasScopeError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      setCanvasBusyId(null)
+    }
+  }, [api, tt])
+
+  const copyCanvasId = useCallback((project: CanvasSummary): void => {
+    void navigator.clipboard?.writeText(project.id)
+  }, [])
+
+  const canvasArchivedProjects = canvasProjects.filter(project => project.archived === true)
+  const canvasFavoriteProjects = canvasProjects.filter(project => project.favorite === true && project.archived !== true)
+  const canvasOtherProjects = canvasProjects.filter(project => project.favorite !== true && project.archived !== true)
 
   /**
    * 历史行上的「来自画布 ×」标签用的名字。挂在行上的是 {@link CanvasTaskMeta}，
@@ -2938,6 +2945,116 @@ export function ImageGenPanel(props: {
     }]
   }, [openCanvasProject])
 
+  /**
+   * 一张画布在左栏里的那一行。
+   *
+   * WHY 抽成一个函数：归档区和非归档区是同一行、只是动作不同（归档 vs 取消归档），
+   * 两份 JSX 迟早会漂成两种长相，而这一栏最要紧的就是两个货架长得一样。行内图标
+   * 只放最常用的三个（收藏/归档/删除），改名、复制 ID、在文件管理器里打开这类长尾
+   * 动作全部进右键菜单——历史行也是这套分工。
+   */
+  const renderCanvasRow = (project: CanvasSummary, archived: boolean): ReactNode => {
+    const title = project.title.trim() === '' ? tt('canvas.untitled') : project.title.trim()
+    const busy = canvasBusyId === project.id
+    const items: RowMenuItem[] = [
+      { key: 'open', label: tt('menu.open'), run: () => { openCanvasProject(project.id) } },
+      { key: 'rename', label: tt('history.canvasRename'), disabled: busy, run: () => { void renameCanvasProject(project) } },
+      ...archived ? [] : [{
+        key: 'favorite',
+        label: project.favorite === true ? tt('history.canvasUnfavorite') : tt('history.canvasFavorite'),
+        disabled: busy,
+        run: () => { void favoriteCanvasProject(project) },
+      }],
+      { key: 'copyId', label: tt('history.canvasCopyId'), run: () => { copyCanvasId(project) } },
+      { key: 'reveal', label: tt('history.revealData'), run: () => { void api.openDataFolder() } },
+      archived
+        ? { key: 'unarchive', label: tt('history.unarchive'), disabled: busy, run: () => { void archiveCanvasProject(project, false) } }
+        : { key: 'archive', label: tt('history.archive'), disabled: busy, run: () => { void archiveCanvasProject(project, true) } },
+      { key: 'delete', label: tt('history.delete'), danger: true, disabled: busy, run: () => { void removeCanvasProject(project) } },
+    ]
+    return (
+      <div
+        key={project.id}
+        className={css.historyItem}
+        data-kind="canvas"
+        data-archived={archived ? '' : undefined}
+        data-canvas-busy={busy ? '' : undefined}
+        ref={contextMenuFor(items)}
+      >
+        <button type="button" className={css.historyMain} data-canvas-row={project.id} onClick={() => { openCanvasProject(project.id) }}>
+          <span className={css.canvasRowGlyph} aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="1.8" y="2.6" width="5.4" height="4.4" rx="1" />
+              <rect x="8.8" y="2.6" width="5.4" height="4.4" rx="1" />
+              <rect x="1.8" y="9" width="12.4" height="4.4" rx="1" />
+              <path d="M7.2 4.8h1.6" />
+            </svg>
+          </span>
+          <span className={css.historyInfo}>
+            <span className={css.historyPrompt}>{title}</span>
+            <span className={css.historyMeta}>
+              {tt('history.canvasMeta', { count: project.nodeCount })}
+              {' · '}{formatTime(project.updatedAt)}
+            </span>
+          </span>
+        </button>
+        <span className={css.historyActions}>
+          {archived ? (
+            <button
+              type="button"
+              className={css.historyIconAction}
+              disabled={busy}
+              title={tt('history.unarchive')}
+              aria-label={tt('history.unarchive')}
+              data-canvas-unarchive=""
+              onClick={() => { void archiveCanvasProject(project, false) }}
+            >
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 6.5h11" /><path d="M3.6 6.5l.7 6.4a1 1 0 0 0 1 .9h5.4a1 1 0 0 0 1-.9l.7-6.4" /><path d="M8 9.4V2.9" /><path d="M5.4 5.4L8 2.8l2.6 2.6" /></svg>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={css.historyIconAction}
+              data-active={project.favorite === true ? '' : undefined}
+              disabled={busy}
+              title={project.favorite === true ? tt('history.canvasUnfavorite') : tt('history.canvasFavorite')}
+              aria-label={project.favorite === true ? tt('history.canvasUnfavorite') : tt('history.canvasFavorite')}
+              data-canvas-favorite=""
+              onClick={() => { void favoriteCanvasProject(project) }}
+            >
+              <svg viewBox="0 0 16 16" width="14" height="14" fill={project.favorite === true ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" aria-hidden="true"><path d="M8 2.2l1.7 3.6 3.9.5-2.9 2.7.7 3.9L8 11l-3.4 1.9.7-3.9L2.4 6.3l3.9-.5z" /></svg>
+            </button>
+          )}
+          {archived ? null : (
+            <button
+              type="button"
+              className={css.historyIconAction}
+              disabled={busy}
+              title={tt('history.archive')}
+              aria-label={tt('history.archive')}
+              data-canvas-archive=""
+              onClick={() => { void archiveCanvasProject(project, true) }}
+            >
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2 3.2h12" /><path d="M3.2 3.2v8.6a1.2 1.2 0 0 0 1.2 1.2h7.2a1.2 1.2 0 0 0 1.2-1.2V3.2" /><path d="M6.4 6.6h3.2" /></svg>
+            </button>
+          )}
+          <button
+            type="button"
+            className={css.historyIconAction}
+            data-danger
+            disabled={busy}
+            title={tt('history.delete')}
+            aria-label={tt('history.delete')}
+            data-canvas-delete=""
+            onClick={() => { void removeCanvasProject(project) }}
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 4.5h11" /><path d="M6 4.5V3.2a.7.7 0 0 1 .7-.7h2.6a.7.7 0 0 1 .7.7v1.3" /><path d="M4.3 4.5l.6 8.1a1 1 0 0 0 1 .9h4.2a1 1 0 0 0 1-.9l.6-8.1" /><path d="M6.7 7v4M9.3 7v4" /></svg>
+          </button>
+        </span>
+      </div>
+    )
+  }
+
   // Render history into the shell sidebar so it remains a separate navigation
   // surface from both the image workspace and the native conversation.
   const historyPanel = (
@@ -2945,47 +3062,48 @@ export function ImageGenPanel(props: {
       <header className={css.historyHeader}>
         <span className={css.historyTitle}>{tt('history.title')}</span>
         <div className={css.historyHeaderActions}>
-          {historyScope === 'canvases' ? (
-            <button
-              type="button"
-              className={css.historyClear}
-              data-canvas-new=""
-              title={tt('canvas.newHint')}
-              onClick={() => { void createCanvasProject() }}
-            >
-              ＋ {tt('history.newCanvas')}
+          {/* 两个货架长同一张脸：＋ 新建、已归档，都是同一套位置和同一套行为。
+              只是 ＋ 在两个货架上新建的东西不同，所以文案随货架走。 */}
+          <button
+            type="button"
+            className={css.historyClear}
+            data-history-new=""
+            data-canvas-new={historyScope === 'canvases' ? '' : undefined}
+            title={historyScope === 'canvases' ? tt('canvas.newHint') : tt('canvas.newHint')}
+            onClick={() => {
+              if (historyScope === 'canvases') { void createCanvasProject(); return }
+              startNewCreation()
+            }}
+          >
+            ＋ {historyScope === 'canvases' ? tt('history.newCanvas') : tt('history.newThread')}
+          </button>
+          <button
+            type="button"
+            className={css.historyArchivedToggle}
+            data-active={historyArchivedOpen ? '' : undefined}
+            data-history-archived-toggle=""
+            aria-pressed={historyArchivedOpen}
+            title={tt('history.archivedHint')}
+            onClick={() => {
+              // 归档是同一个开关、两套内容：站在哪个货架上，归档的就是那个货架的
+              // 东西。画布列表在别处也会变（画布面里新建/删除），所以顺手重读。
+              if (historyScope === 'canvases') {
+                setHistoryArchivedOpen(previous => !previous)
+                void loadCanvasProjects()
+                return
+              }
+              void toggleArchivedHistory()
+            }}
+          >
+            {tt('history.archived')}{(historyScope === 'canvases' ? canvasArchivedProjects.length : archivedHistory.length) === 0
+              ? ''
+              : ` ${String(historyScope === 'canvases' ? canvasArchivedProjects.length : archivedHistory.length)}`}
+          </button>
+          {historyScope === 'generations' && !historyArchivedOpen && unifiedHistory.length > 0 ? (
+            <button type="button" className={css.historyClear} data-history-clear="" onClick={() => { void clearHistory() }}>
+              {tt('history.clear')}
             </button>
-          ) : (
-            <>
-              {/* A labelled button, not a bare glyph: the icon-only version read as
-                  decoration to anyone who had not used it before. */}
-              <button
-                type="button"
-                className={css.historyClear}
-                data-history-new=""
-                title={tt('canvas.newHint')}
-                onClick={startNewCreation}
-              >
-                ＋ {tt('history.newThread')}
-              </button>
-              <button
-                type="button"
-                className={css.historyArchivedToggle}
-                data-active={historyArchivedOpen ? '' : undefined}
-                data-history-archived-toggle=""
-                aria-pressed={historyArchivedOpen}
-                title={tt('history.archivedHint')}
-                onClick={() => { void toggleArchivedHistory() }}
-              >
-                {tt('history.archived')}{archivedHistory.length === 0 ? '' : ` ${String(archivedHistory.length)}`}
-              </button>
-              {!historyArchivedOpen && unifiedHistory.length > 0 ? (
-                <button type="button" className={css.historyClear} data-history-clear="" onClick={() => { void clearHistory() }}>
-                  {tt('history.clear')}
-                </button>
-              ) : null}
-            </>
-          )}
+          ) : null}
         </div>
       </header>
 
@@ -3015,25 +3133,6 @@ export function ImageGenPanel(props: {
         ))}
       </div>
 
-      {historyScope !== 'generations' ? null : (
-        <div className={css.historyFilters} data-history-filters="">
-        <input className={css.historySearch} value={historyQuery} onChange={event => { setHistoryQuery(event.target.value) }} placeholder={tt('history.search')} aria-label={tt('history.search')} />
-        <Select value={historyKindFilter} onChange={value => { setHistoryKindFilter(value as 'all' | 'image' | 'video') }} aria-label={tt('history.kind')}>
-          <option value="all">{tt('history.allKinds')}</option>
-          <option value="image">{tt('history.imagesOnly')}</option>
-          <option value="video">{tt('history.videosOnly')}</option>
-        </Select>
-        <Select value={historyModelFilter} onChange={value => { setHistoryModelFilter(value) }} aria-label={tt('history.model')}>
-          <option value="all">{tt('history.allModels')}</option>
-          {historyModelOptions.map(option => <option key={option} value={option}>{option}</option>)}
-        </Select>
-        <Select value={historyRatioFilter} onChange={value => { setHistoryRatioFilter(value) }} aria-label={tt('history.ratio')}>
-          <option value="all">{tt('history.allRatios')}</option>
-          {historyRatioOptions.map(option => <option key={option} value={option}>{option}</option>)}
-        </Select>
-      </div>
-
-      )}
 
       {/* 普通生图 is one long conversation, so its thread list belongs here
           rather than in a second column inside the studio. */}
@@ -3085,73 +3184,22 @@ export function ImageGenPanel(props: {
       )}
 
       {historyScope === 'canvases' ? (
-        <div className={css.historyList} data-history-canvases="">
+        <div className={css.historyList} data-history-canvases="" data-archived={historyArchivedOpen ? '' : undefined}>
           {canvasScopeError === null ? null : (
             <div className={css.historyEmpty} data-canvas-error="">{canvasScopeError}</div>
           )}
-          {canvasProjects.length === 0 ? (
+          {historyArchivedOpen ? (
+            canvasArchivedProjects.length === 0
+              ? <div className={css.historyEmpty} data-canvas-empty="">{tt('history.archivedEmpty')}</div>
+              : canvasArchivedProjects.map(project => renderCanvasRow(project, true))
+          ) : canvasFavoriteProjects.length === 0 && canvasOtherProjects.length === 0 ? (
             <div className={css.historyEmpty} data-canvas-empty="">{tt('history.canvasesEmpty')}</div>
           ) : (
             <>
               {canvasFavoriteProjects.length === 0 ? null : (
                 <div className={css.historySection}>{tt('history.canvasFavorites')}</div>
               )}
-              {[...canvasFavoriteProjects, ...canvasOtherProjects].map(project => {
-                const title = project.title.trim() === '' ? tt('canvas.untitled') : project.title.trim()
-                return (
-                  <div key={project.id} className={css.historyItem} data-kind="canvas" data-canvas-busy={canvasBusyId === project.id ? '' : undefined}
-                    ref={contextMenuFor([
-                      { key: 'open', label: tt('menu.open'), run: () => { openCanvasProject(project.id) } },
-                      { key: 'favorite', label: project.favorite === true ? tt('history.canvasUnfavorite') : tt('history.canvasFavorite'), run: () => { void favoriteCanvasProject(project) } },
-                      { key: 'delete', label: tt('history.delete'), danger: true, run: () => { void removeCanvasProject(project) } },
-                    ])}
-                  >
-                    <button type="button" className={css.historyMain} data-canvas-row={project.id} onClick={() => { openCanvasProject(project.id) }}>
-                      <span className={css.canvasRowGlyph} aria-hidden="true">
-                        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="1.8" y="2.6" width="5.4" height="4.4" rx="1" />
-                          <rect x="8.8" y="2.6" width="5.4" height="4.4" rx="1" />
-                          <rect x="1.8" y="9" width="12.4" height="4.4" rx="1" />
-                          <path d="M7.2 4.8h1.6" />
-                        </svg>
-                      </span>
-                      <span className={css.historyInfo}>
-                        <span className={css.historyPrompt}>{title}</span>
-                        <span className={css.historyMeta}>
-                          {tt('history.canvasMeta', { count: project.nodeCount })}
-                          {' · '}{formatTime(project.updatedAt)}
-                        </span>
-                      </span>
-                    </button>
-                    <span className={css.historyActions}>
-                      <button
-                        type="button"
-                        className={css.historyIconAction}
-                        data-active={project.favorite === true ? '' : undefined}
-                        disabled={canvasBusyId === project.id}
-                        title={project.favorite === true ? tt('history.canvasUnfavorite') : tt('history.canvasFavorite')}
-                        aria-label={project.favorite === true ? tt('history.canvasUnfavorite') : tt('history.canvasFavorite')}
-                        data-canvas-favorite=""
-                        onClick={() => { void favoriteCanvasProject(project) }}
-                      >
-                        <svg viewBox="0 0 16 16" width="14" height="14" fill={project.favorite === true ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" aria-hidden="true"><path d="M8 2.2l1.7 3.6 3.9.5-2.9 2.7.7 3.9L8 11l-3.4 1.9.7-3.9L2.4 6.3l3.9-.5z" /></svg>
-                      </button>
-                      <button
-                        type="button"
-                        className={css.historyIconAction}
-                        data-danger
-                        disabled={canvasBusyId === project.id}
-                        title={tt('history.delete')}
-                        aria-label={tt('history.delete')}
-                        data-canvas-delete=""
-                        onClick={() => { void removeCanvasProject(project) }}
-                      >
-                        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 4.5h11" /><path d="M6 4.5V3.2a.7.7 0 0 1 .7-.7h2.6a.7.7 0 0 1 .7.7v1.3" /><path d="M4.3 4.5l.6 8.1a1 1 0 0 0 1 .9h4.2a1 1 0 0 0 1-.9l.6-8.1" /><path d="M6.7 7v4M9.3 7v4" /></svg>
-                      </button>
-                    </span>
-                  </div>
-                )
-              })}
+              {[...canvasFavoriteProjects, ...canvasOtherProjects].map(project => renderCanvasRow(project, false))}
             </>
           )}
         </div>
@@ -3491,21 +3539,21 @@ export function ImageGenPanel(props: {
         <GooeyNav
           ariaLabel={tt('workspace.label')}
           activeIndex={workspace === 'studio' ? 0
-            : workspace === 'normal' ? 1
-              : workspace === 'canvas' ? 2
+            : workspace === 'canvas' ? 1
+              : workspace === 'normal' ? 2
                 : 3}
           onSelect={index => {
             if (index === 0) setWorkspace('studio')
-            else if (index === 1) openTab('gallery')
-            else setWorkspace('canvas')
+            else if (index === 1) setWorkspace('canvas')
+            else openTab('gallery')
           }}
           items={[
             // The chat surface *is* 普通生图 now: one conversation drives both
-            // image and video generation, so the classic form only survives as
-            // the gallery (素材库) behind it.
+            // image and video generation. 素材库 sits last because it is a
+            // library, not a workbench: you go there to fetch, never to work.
             { key: 'studio', label: tt('workspace.normal') },
-            { key: 'gallery', label: tt('gallery.title') },
             { key: 'canvas', label: tt('workspace.canvas') },
+            { key: 'gallery', label: tt('gallery.title') },
           ]}
         />
         <span className={css.panelHeaderActions} />

@@ -594,6 +594,7 @@ export class CanvasStore {
         createdAt: project.createdAt,
         updatedAt: project.updatedAt,
         ...project.favorite === true ? { favorite: true } : {},
+        ...project.archived === true ? { archived: true } : {},
       }]
     })
   }
@@ -639,8 +640,11 @@ export class CanvasStore {
       await this.ensure()
       await writeJsonAtomic(this.pagePath(next.id), next)
       const projects = await this.readIndex()
-      const favorite = projects.find(item => item.id === next.id)?.favorite === true
-      await this.writeIndex([this.summaryOf(next, favorite), ...projects.filter(item => item.id !== next.id)])
+      const existing = projects.find(item => item.id === next.id)
+      await this.writeIndex([
+        this.summaryOf(next, existing?.favorite === true, existing?.archived === true),
+        ...projects.filter(item => item.id !== next.id),
+      ])
       return next
     })
   }
@@ -654,6 +658,52 @@ export class CanvasStore {
         : item)
       await this.writeIndex(next)
       return next
+    })
+  }
+
+  /**
+   * Move a canvas into (or out of) the archive.
+   *
+   * Nothing but the flag changes: the page, its assets and its nodes stay put,
+   * which is what makes restoring a one-click affair.
+   */
+  async setArchived(id: string, archived: boolean): Promise<CanvasSummary[]> {
+    return serialize(async () => {
+      const projects = await this.readIndex()
+      if (!projects.some(item => item.id === id)) throw new Error('画布不存在')
+      const next = projects.map(item => item.id === id
+        ? { ...item, ...archived ? { archived: true } : { archived: undefined } }
+        : item)
+      await this.writeIndex(next)
+      return next
+    })
+  }
+
+  /**
+   * Rename a canvas.
+   *
+   * The title lives in two places — the page document (what the canvas header
+   * shows) and the index (what the list shows) — so both are rewritten under the
+   * store's mutation lock. Renaming from the list must never leave a canvas whose
+   * two titles disagree, and it must not bump the revision a client could be
+   * holding for a conflict check any higher than the single edit it is.
+   */
+  async rename(id: string, title: string): Promise<CanvasSummary[]> {
+    const next = title.trim()
+    if (next === '') throw new Error('画布名称不能为空')
+    return serialize(async () => {
+      const document = await this.read(id)
+      if (document === undefined) throw new Error('画布不存在')
+      const saved: CanvasDocument = { ...document, title: next, revision: document.revision + 1, updatedAt: Date.now() }
+      await this.ensure()
+      await writeJsonAtomic(this.pagePath(id), saved)
+      const projects = await this.readIndex()
+      const existing = projects.find(item => item.id === id)
+      await this.writeIndex([
+        this.summaryOf(saved, existing?.favorite === true, existing?.archived === true),
+        ...projects.filter(item => item.id !== id),
+      ])
+      return this.readIndex()
     })
   }
 
@@ -855,7 +905,7 @@ export class CanvasStore {
     await fs.writeFile(targetPath, found.data)
   }
 
-  private summaryOf(document: CanvasDocument, favorite = false): CanvasSummary {
+  private summaryOf(document: CanvasDocument, favorite = false, archived = false): CanvasSummary {
     return {
       id: document.id,
       title: document.title,
@@ -864,6 +914,7 @@ export class CanvasStore {
       createdAt: document.createdAt,
       updatedAt: document.updatedAt,
       ...favorite ? { favorite: true } : {},
+      ...archived ? { archived: true } : {},
     }
   }
 }

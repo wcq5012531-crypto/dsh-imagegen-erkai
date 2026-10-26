@@ -5433,21 +5433,13 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
       .dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true }))
     await new Promise(resolve => setTimeout(resolve, 20))
     assert.ok(jsdomDocument.documentElement.hasAttribute('data-dsh-imagegen-studio-active'), 'the image tab opens the studio')
-    const historyFilter = jsdomDocument.querySelector('button[data-dsh-select][aria-label="模型筛选"]')
-    assert.ok(historyFilter !== null, 'history uses the shared rounded selector')
-    historyFilter.click()
-    await waitForSelector(jsdomDocument, '[data-dsh-select-menu]')
-    const historyFilterMenu = jsdomDocument.querySelector('[data-dsh-select-menu]')
-    assert.equal(historyFilterMenu.parentElement, jsdomDocument.body, 'the menu escapes sidebar clipping')
-    assert.equal(jsdomWindow.getComputedStyle(historyFilterMenu).borderRadius, '12px', 'filters use the same rounded menu as channel selection')
-    historyFilterMenu.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown', { key: 'End', bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 20))
-    assert.equal(historyFilterMenu.getAttribute('aria-activedescendant'), historyFilterMenu.querySelector('[role="option"]:last-child').id, 'End moves keyboard focus to the last option')
-    historyFilterMenu.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 20))
-    assert.equal(jsdomDocument.querySelector('[data-dsh-select-menu]') === null, true, 'Escape closes the menu')
-    assert.equal(jsdomDocument.activeElement, historyFilter, 'closing the menu restores keyboard focus')
-    assert.ok(historyFilter.textContent.includes('全部模型'), 'canceling preserves the current filter')
+    // 1.16.12 removed the left column's search box and three filter dropdowns:
+    // newest-first is the only order that column needs, and a filter bar made it
+    // the one surface in the plugin that looked like a different product. The
+    // shared rounded Select is still exercised through the canvas project picker
+    // and the 生成方式 switch further down this check.
+    assert.equal(jsdomDocument.querySelector('[data-history-filters]'), null, 'the left column carries no filter bar')
+    assert.equal(jsdomDocument.querySelector('button[data-dsh-select][aria-label="模型筛选"]'), null, 'the model filter is gone with the filter bar')
     // 1.16.2 removed the header chat toggle on purpose: the studio is the
     // conversation now, so the native chat track is collapsed for good and the
     // attribute is set once, never toggled. Pin both halves of that decision --
@@ -5533,6 +5525,11 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     assert.ok(normalSwitch !== undefined, 'normal entry is present')
     assert.ok(tablistButtons.some(button => button.textContent?.includes('素材库')), 'gallery entry is present')
     assert.ok(canvasSwitch !== undefined, 'canvas entry is present')
+    // Order is part of the contract: work first, library last. 素材库 used to sit
+    // between the two workbenches, which read as a peer of them instead of a
+    // place you fetch from.
+    const navLabels = tablistButtons.map(button => (button.textContent ?? '').trim())
+    assert.ok(navLabels.findIndex(label => label.includes('素材库')) > navLabels.findIndex(label => label.includes('无限画布')), '素材库 is the last nav entry')
     assert.equal(tablistButtons.some(button => (button.textContent ?? '').includes('电商模式')), false, 'the ecommerce entry stays removed')
     assert.equal(tablistButtons.some(button => (button.textContent ?? '').includes('图片转 PPT')), false, 'the PPT entry stays removed')
     // Switching workspaces and coming back must leave the nav usable: the tab
@@ -6067,12 +6064,21 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     }
     await clickScope('canvases')
     await waitUntil(() => histHost.querySelector('[data-history-canvases]') !== null, 'the canvas shelf renders its list')
-    assert.equal(histHost.querySelector('[data-history-filters]') === null, true, 'the stills filters leave with the stills shelf')
-    assert.equal(histHost.querySelector('[data-history-archived-toggle]') === null, true, 'the archive toggle is a stills control')
+    // The two shelves share one header: same ＋ slot (different verb), same
+    // archive toggle, and no filter bar on either of them.
+    assert.equal(histHost.querySelector('[data-history-filters]') === null, true, 'the left column carries no filter bar on either shelf')
+    assert.ok(histHost.querySelector('[data-history-archived-toggle]') !== null, 'the archive toggle rides the shared header, not just the stills shelf')
     assert.ok(histHost.querySelector('[data-canvas-new]') !== null, 'the canvas shelf can start a new canvas')
+    const canvasRow = histHost.querySelector('[data-canvas-row]')
+    if (canvasRow !== null) {
+      assert.ok(histHost.querySelector('[data-canvas-archive]') !== null, 'a canvas row can be archived from the list')
+      assert.ok(histHost.querySelector('[data-canvas-favorite]') !== null, 'a canvas row keeps its favourite action')
+    }
+    assert.ok(scopeTab('generations').textContent.includes('普通生图'), 'the stills shelf carries the workbench name')
+    assert.ok(scopeTab('canvases').textContent.includes('无限画布'), 'the canvas shelf carries the workbench name')
     await clickScope('generations')
-    await waitUntil(() => histHost.querySelector('[data-history-filters]') !== null, 'the stills shelf comes back with its filters')
-    assert.ok(histHost.querySelector('[data-history-archived-toggle]') !== null, 'the archive toggle returns with the stills shelf')
+    await waitUntil(() => histHost.querySelector('[data-history-new]') !== null, 'the stills shelf comes back with its own new-item action')
+    assert.ok(histHost.querySelector('[data-history-archived-toggle]') !== null, 'the archive toggle is still there for stills')
 
     // Switching shelves re-renders the list, so the clip row captured above is
     // detached by now. Re-query it before acting through it.
