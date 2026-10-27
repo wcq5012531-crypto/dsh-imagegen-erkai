@@ -8,7 +8,7 @@
 export const IMAGEGEN_SETTINGS_NAMESPACE = 'dsh-imagegen-studio'
 
 /** Published package version shared by the host updater and the client UI. */
-export const PLUGIN_VERSION = '1.16.13'
+export const PLUGIN_VERSION = '1.16.14'
 
 /** Same-origin route family (loopback-only, mirroring the dsh-ssh fence). */
 export const SETTINGS_API = {
@@ -874,6 +874,12 @@ export interface CanvasShot {
   seconds: number
   /** The video node this shot produced, once one has been created. */
   nodeId?: string
+  /**
+   * Optional image-node id used as this shot's first frame. When set, it wins
+   * over continuity carry (previous-shot last frame). Lets a storyboard pull
+   * a specific material into one beat of a long film.
+   */
+  firstFrameNodeId?: string
 }
 
 /**
@@ -1381,6 +1387,40 @@ export interface CanvasSketchDrawing {
   strokes: CanvasSketchStroke[]
 }
 
+/** Shape kinds in the unified image-edit plan (annotate mode). */
+export type CanvasImagePlanKind =
+  | 'rect'
+  | 'ellipse'
+  | 'arrow'
+  | 'freecircle'
+  | 'pin'
+  | 'pen'
+  | 'text'
+
+/**
+ * One vector mark on an image, stored in normalized 0..1 image space so it
+ * survives node resize. Distinct from {@link CanvasAnnotation}: annotations
+ * still hang prompt cards; plan marks export into the generation prompt and
+ * overlay the thumb without requiring a text node each.
+ */
+export interface CanvasImagePlanMark {
+  id: string
+  kind: CanvasImagePlanKind
+  /** Normalized points: rect/ellipse use [tl, br]; arrow/free/pen use path; pin uses one point. */
+  points: Array<{ x: number; y: number }>
+  color: string
+  width: number
+  /** Optional label (pin number, text note, region role). */
+  label?: string
+  /** Optional free-form note folded into the prompt export. */
+  note?: string
+}
+
+/** Vector overlay plan for the unified image editor. */
+export interface CanvasImagePlan {
+  marks: CanvasImagePlanMark[]
+}
+
 export interface CanvasViewport {
   x: number
   y: number
@@ -1507,6 +1547,11 @@ export interface CanvasNodeMetadata {
   transparent?: boolean
   /** Sketch boards: the live drawing behind an image node. */
   sketch?: CanvasSketchDrawing
+  /**
+   * Image nodes: vector plan from the unified image editor (annotate mode).
+   * Prompt export and thumb overlay read this; generation may append notes.
+   */
+  imagePlan?: CanvasImagePlan
   /** File nodes: coarse bucket driving the icon and preview branch. */
   fileKind?: CanvasFileKind
   /** Skill-produced nodes: which skill produced this and from what. */
@@ -1536,6 +1581,12 @@ export interface CanvasStoryboard {
   /** Shared model override; absent means the canvas default video model. */
   model?: string
   channelId?: string
+  /**
+   * When true, an auto-run that finishes every ready shot also kicks the
+   * canvas stitch path. Off by default so a partial board is never silently
+   * turned into a short film.
+   */
+  autoStitch?: boolean
 }
 
 export interface CanvasNode {

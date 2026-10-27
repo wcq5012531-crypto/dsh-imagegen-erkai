@@ -328,6 +328,7 @@ function isShot(value: unknown): boolean {
   if (typeof shot.prompt !== 'string') return false
   if (typeof shot.seconds !== 'number' || !Number.isFinite(shot.seconds) || shot.seconds <= 0) return false
   if (shot.nodeId !== undefined && typeof shot.nodeId !== 'string') return false
+  if (shot.firstFrameNodeId !== undefined && typeof shot.firstFrameNodeId !== 'string') return false
   return true
 }
 
@@ -352,6 +353,7 @@ function isStoryboard(value: unknown): boolean {
   if (board.continuity !== undefined && board.continuity !== 'cut' && board.continuity !== 'carry') return false
   if (board.model !== undefined && typeof board.model !== 'string') return false
   if (board.channelId !== undefined && typeof board.channelId !== 'string') return false
+  if (board.autoStitch !== undefined && typeof board.autoStitch !== 'boolean') return false
   return true
 }
 

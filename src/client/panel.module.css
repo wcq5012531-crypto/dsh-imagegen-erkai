@@ -57,6 +57,12 @@
  *   70  scrim             the canvas modal scrim
  *   71  popover-raised    the skills menu / dialog above that scrim
  *   72  chat-resizer      the column resize handle, above the takeover
+ *   80  image-editor      the canvas image editor, above the scrim and the
+ *                          takeover it is opened from, below the file reader
+ *   82  hover-preview     the canvas hover preview card. It sits just under the
+ *                          context menu on purpose: a preview must never cover
+ *                          the menu that was opened over it (was 90, tied with
+ *                          context-menu, and the winner was insertion order)
  *   86  file-overlay      the full-screen file reader
  *   90  context-menu      canvas context menu and the update popover
  *   92  diagnostics       the retained-attempt record, opened from the task
@@ -110,6 +116,10 @@
   --z-scrim: 70;
   --z-popover-raised: 71;
   --z-chat-resizer: 72;
+
+  /* editor surfaces hung off the canvas */
+  --z-image-editor: 80;
+  --z-hover-preview: 82;
 
   /* canvas overlays above the scrim */
   --z-file-overlay: 86;

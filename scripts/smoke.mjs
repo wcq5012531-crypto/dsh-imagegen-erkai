@@ -6150,120 +6150,73 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     // asserted; the canvas-body assertions below still cover the workspace.
 
     const nodeTool = (nodeId, label) => view.querySelector(`[data-node-id="${nodeId}"] [title^="${label}"]`)
-    assert.ok(nodeTool('node-image', '标注') !== null, '标注 button rendered')
+    assert.ok(nodeTool('node-image', '图片编辑') !== null, 'the unified image editor entry rendered')
     assert.ok(nodeTool('node-image', '移除背景') !== null, '移除背景 button rendered')
     assert.ok(nodeTool('node-image', '图层拆分') !== null, '图层拆分 button rendered')
     assert.ok(view.querySelector('[data-node-id="node-image"] button[aria-label^="本节点使用的模型"]') !== null, 'node model selector rendered')
 
-    // Enter annotation mode: the image body gains a drawing overlay.
-    nodeTool('node-image', '标注').click()
-    await waitForSelector(view, '[data-node-id="node-image"][data-annotating]')
-    const overlay = view.querySelector('[data-node-id="node-image"] [title^="在图片上拖拽画框"]')
-    assert.ok(overlay !== null, 'annotation overlay mounted')
-    // The 64x64 image letterboxes into a 100x100 overlay: a drag from 10% to
-    // 60% must land as a normalized 0.5 box.
-    overlay.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) })
-    const pointer = (type, x, y) => overlay.dispatchEvent(new jsdomWindow.MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 }))
-    pointer('pointerdown', 10, 10)
-    await new Promise(resolve => setTimeout(resolve, 20))
-    pointer('pointermove', 60, 60)
-    await new Promise(resolve => setTimeout(resolve, 20))
-    pointer('pointerup', 60, 60)
-    await waitForSelector(view, 'textarea[placeholder^="描述这个框里要改成什么"]')
-    const cardArea = view.querySelector('textarea[placeholder^="描述这个框里要改成什么"]')
-    assert.ok(cardArea !== null, 'releasing the box created a prompt card')
-    assert.ok(view.querySelector('[data-node-id="node-image"][data-annotating]') !== null, 'annotation mode stays active for more boxes')
-    // Delete inside an empty card removes the card itself (the key would look
-    // broken otherwise, since a fresh card has nothing to erase).
-    const firstCardId = cardArea.closest('[data-node-id]').getAttribute('data-node-id')
-    // Make sure the card is on the canvas (a save carrying it landed) before
-    // deleting it, so the assertion below cannot pass on a stale snapshot.
-    assert.ok(await waitUntil(() => (canvasSaves.at(-1)?.nodes ?? []).some(node => node.id === firstCardId)), 'the prompt card reached the document')
-    cardArea.dispatchEvent(new jsdomWindow.KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))
+    // 涂鸦与标注合并进一个全屏面板（图片编辑）：画布上不再有内联标注层。
+    // 这里只钉住入口与面板骨架，绘制逻辑归面板自己的用例——否则这段测试
+    // 会变成「某一种实现」的截图测试。
+    nodeTool('node-image', '图片编辑').click()
+    await waitForSelector(view, '[data-image-edit-surface]')
+    const editSurface = view.querySelector('[data-image-edit-surface]')
+    assert.ok(editSurface !== null, 'the image editor opens as a full-screen surface')
+    const editTabs = [...editSurface.querySelectorAll('[role="tab"]')]
+    assert.equal(editTabs.length, 2, 'the editor splits into sketch and annotate')
     assert.ok(
-      await waitUntil(() => view.querySelector(`[data-node-id="${firstCardId}"]`) === null),
-      'Delete removes an empty text card',
+      editTabs.some(tab => tab.getAttribute('aria-selected') === 'true' && tab.textContent.includes('标注')),
+      'a picture without strokes opens on the annotate tab',
     )
-    // Draw the box that carries the real prompt.
-    const overlay2 = view.querySelector('[data-node-id="node-image"] [title^="在图片上拖拽画框"]')
-    overlay2.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) })
-    const pointer2 = (type, x, y) => overlay2.dispatchEvent(new jsdomWindow.MouseEvent(type, { bubbles: true, clientX: x, clientY: y, button: 0 }))
-    pointer2('pointerdown', 10, 10)
-    await new Promise(resolve => setTimeout(resolve, 20))
-    pointer2('pointermove', 60, 60)
-    await new Promise(resolve => setTimeout(resolve, 20))
-    pointer2('pointerup', 60, 60)
-    await waitForSelector(view, 'textarea[placeholder^="描述这个框里要改成什么"]')
-    const cardArea2 = view.querySelector('textarea[placeholder^="描述这个框里要改成什么"]')
-    assert.ok(cardArea2 !== null, 'a second box produced a new prompt card')
-    // Type the box prompt; the debounced save carries it into the document.
-    const nativeTextAreaSetter = Object.getOwnPropertyDescriptor(jsdomWindow.HTMLTextAreaElement.prototype, 'value').set
-    nativeTextAreaSetter.call(cardArea2, '把这里换成一只橘猫')
-    cardArea2.dispatchEvent(new jsdomWindow.Event('input', { bubbles: true }))
-    await waitUntil(() => (canvasSaves.at(-1)?.nodes ?? []).some(node => node.metadata?.text === '把这里换成一只橘猫'))
-    const savedAfterAnnotation = canvasSaves.at(-1)
-    assert.ok(savedAfterAnnotation !== undefined, 'annotation edit was persisted')
-    const annotationImage = savedAfterAnnotation.nodes.find(node => node.id === 'node-image')
-    assert.equal(annotationImage.metadata.annotations.length, 1, `the box is recorded on the image node: ${JSON.stringify(annotationImage.metadata.annotations)}`)
-    const recordedBox = annotationImage.metadata.annotations[0]
-    assert.deepEqual(
-      { x: recordedBox.x, y: recordedBox.y, width: recordedBox.width, height: recordedBox.height },
-      { x: 0.1, y: 0.1, width: 0.5, height: 0.5 },
+    assert.ok(editSurface.querySelector('canvas') !== null, 'the editor paints on its own canvas')
+    assert.ok(
+      [...editSurface.querySelectorAll('button')].some(button => (button.getAttribute('title') ?? '').startsWith('框选')),
+      'the annotate toolbar offers the box tool',
     )
-    const cardNode = savedAfterAnnotation.nodes.find(node => node.id === recordedBox.nodeId)
-    assert.ok(cardNode !== undefined, 'the box links to its prompt card')
-    assert.equal(cardNode.metadata.text, '把这里换成一只橘猫')
-    assert.deepEqual(
-      savedAfterAnnotation.connections.map(connection => `${connection.fromNodeId}->${connection.toNodeId}`),
-      ['node-image->node-config'],
-      'annotation cards are attached, not wired into the graph',
-    )
-    const linkLayer = view.querySelector('[data-annotation-links]')
-    assert.ok(linkLayer !== null, 'annotation leader lines render in their own layer')
-    assert.ok(linkLayer.querySelector('[data-annotation-link]') !== null, 'the box has a leader line')
-    assert.ok(linkLayer.querySelector('circle') !== null, 'the leader line starts with an anchor dot on the box')
-    // The layer must paint above the nodes, otherwise the line hides under the
-    // picture it points at.
-    const imageElementForOrder = view.querySelector('[data-node-id="node-image"]')
     assert.equal(
-      linkLayer.compareDocumentPosition(imageElementForOrder) & jsdomWindow.Node.DOCUMENT_POSITION_PRECEDING,
-      jsdomWindow.Node.DOCUMENT_POSITION_PRECEDING,
-      'the leader-line layer comes after the nodes in document order',
+      view.querySelector('[data-node-id="node-image"][data-annotating]') === null,
+      true,
+      'the canvas no longer starts an inline annotation layer',
     )
+    const closeEdit = [...editSurface.querySelectorAll('button')].find(button => button.textContent === '关闭编辑器')
+    assert.ok(closeEdit !== undefined, 'the editor can be dismissed')
+    closeEdit.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true, cancelable: true }))
+    assert.ok(await waitUntil(() => view.querySelector('[data-image-edit-surface]') === null), 'dismissing the editor unmounts it')
 
-    // Generate from the config node: the request must carry the boxed reference.
+    // Generate from the config node: a plain text-to-image run still has to carry
+    // canvas lineage so the placeholder can be filled when the run settles.
     // The earlier settings flow cleared the channel key, so restore it first —
     // the composer refuses to submit while the plugin reads as disconnected.
     face.channels.setChannelKey('default', 'sk-new')
     await face.channels.commit()
     await new Promise(resolve => setTimeout(resolve, 120))
     view.querySelector('[data-node-id="node-config"]').dispatchEvent(new jsdomWindow.MouseEvent('pointerdown', { bubbles: true, clientX: 5, clientY: 5, button: 0 }))
-    await waitForSelector(view, '[aria-label="生成图片"]')
-    const sendButton = view.querySelector('[aria-label="生成图片"]')
-    // React refuses to invoke click handlers on a disabled control (mirroring
-    // the browser), so wait for the composer to leave the disconnected state.
-    assert.ok(await waitUntil(() => view.querySelector('[aria-label="生成图片"]')?.disabled === false), 'composer enabled after the key is restored')
-    sendButton.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true, cancelable: true }))
+    await waitForSelector(view, '[data-canvas-no-zoom] textarea')
+    const canvasPromptBefore = view.querySelector('[data-canvas-no-zoom] textarea')
+    assert.ok(canvasPromptBefore !== null, 'the canvas composer prompt is mounted')
+    // 一张空白画布上的提交按钮在没写提示词时是禁用的，所以先写字再问「能不能发」。
+    const canvasPromptSetter = Object.getOwnPropertyDescriptor(jsdomWindow.HTMLTextAreaElement.prototype, 'value').set
+    canvasPromptSetter.call(canvasPromptBefore, '一只橘猫坐在窗台上')
+    canvasPromptBefore.dispatchEvent(new jsdomWindow.Event('input', { bubbles: true }))
+    await new Promise(resolve => setTimeout(resolve, 60))
+    assert.ok(await waitUntil(() => view.querySelector('[aria-label="生成图片"]')?.disabled === false), 'composer enables once a prompt exists and the key is back')
+    const imageSend = view.querySelector('[aria-label="生成图片"]')
+    assert.equal(imageSend.disabled, false, 'the composer enables once a prompt exists')
+    imageSend.dispatchEvent(new jsdomWindow.MouseEvent('click', { bubbles: true, cancelable: true }))
     if (!await waitUntil(() => canvasTasks.length > 0)) {
       const toast = [...view.querySelectorAll('[role="status"]')].map(element => element.textContent).join(' | ')
-      throw new Error(`no task submitted; toast: ${toast}; requests: ${requestPaths.slice(-6).join(',')}`)
+      throw new Error(`no canvas task submitted; toast: ${toast}; requests: ${requestPaths.slice(-6).join(',')}`)
     }
-    const boxed = canvasTasks[0]
-    assert.equal(boxed.mode, 'edit', 'an annotated generation runs in edit mode')
-    assert.equal(boxed.model, 'gpt-image-2', 'the configured model is used')
-    assert.ok(String(boxed.image).startsWith('data:image/png;base64,'), 'the marked reference is uploaded as a data URL')
-    assert.equal(boxed.refName, 'canvas-annotated.png')
-    assert.ok(boxed.prompt.includes('【局部修改约束】'), 'the box constraint reaches the prompt')
-    assert.ok(boxed.prompt.includes('把这里换成一只橘猫'), 'the card prompt reaches the prompt')
-    assert.ok(boxed.prompt.includes('框 1（左 10%，上 10%，右 60%，下 60%）'), `box coordinates are described: ${boxed.prompt}`)
-    assert.equal(boxed.canvas.sourceNodeId, 'node-image', 'the generation is anchored on the annotated image')
-    assert.equal(boxed.canvas.parentNodeId, 'node-config')
-    // The placeholder remembers the boxes so the finished image can be
-    // composited back onto the clean original (the marker must not survive).
-    assert.ok(
-      await waitUntil(() => (canvasSaves.at(-1)?.nodes ?? []).some(node => node.metadata?.annotationEdit !== undefined)),
-      'the generated placeholder records the annotated boxes for compositing',
-    )
+    const canvasTask = canvasTasks.at(-1)
+    assert.equal(canvasTask.prompt, '一只橘猫坐在窗台上', `the composer prompt reaches the request verbatim: ${JSON.stringify(canvasTask.prompt)}`)
+    // 配置节点接在一张图后面：图会被当作参考，于是这次运行是 edit 而不是纯文生图。
+    // 这正是「在图上继续做」的语义，钉住它比钉「一定是 text」更有意义。
+    assert.equal(canvasTask.mode, 'edit', `a run downstream of a picture carries it as a reference: ${canvasTask.mode}`)
+    assert.equal(canvasTask.model, 'gpt-image-2', 'the configured model is used')
+    assert.ok(String(canvasTask.image).startsWith('data:image/png;base64,'), 'the upstream picture is uploaded as a data URL')
+    assert.equal(canvasTask.refName, 'canvas-reference.png', 'the reference keeps the canvas naming')
+    assert.equal(canvasTask.canvas.sourceNodeId, 'node-image', 'the run is anchored on the picture it builds from')
+    assert.equal(canvasTask.canvas.parentNodeId, 'node-config', 'the run hangs under the config node')
 
     // --- canvas video: the composer switches kind and submits a video run ---
     // The canvas shares one composer between images and clips; this proves the
@@ -6565,7 +6518,6 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
     // --- image node ergonomics: attached cards follow, four corner grips ---
     const beforeDrag = canvasSaves.at(-1)
     const imageBefore = beforeDrag.nodes.find(node => node.id === 'node-image')
-    const cardBefore = beforeDrag.nodes.find(node => node.id === cardNode.id)
     const imageElement = view.querySelector('[data-node-id="node-image"]')
     imageElement.dispatchEvent(new jsdomWindow.MouseEvent('pointerdown', { bubbles: true, clientX: 10, clientY: 10, button: 0 }))
     jsdomWindow.dispatchEvent(new jsdomWindow.MouseEvent('pointermove', { bubbles: true, clientX: 110, clientY: 60, button: 0 }))
@@ -6578,10 +6530,9 @@ await check('E1 client apply mounts the sidebar entry and studio (jsdom)', async
       }),
       'the image node moved with the pointer',
     )
-    const afterDrag = canvasSaves.at(-1)
-    const cardAfter = afterDrag.nodes.find(node => node.id === cardNode.id)
-    assert.equal(cardAfter.x, cardBefore.x + 100, 'the attached prompt card follows its image node horizontally')
-    assert.equal(cardAfter.y, cardBefore.y + 50, 'the attached prompt card follows its image node vertically')
+    // 标注卡片仍然只跟随图片移动（attachedCards 逻辑还在），但它现在只能由
+    // 「图片编辑」面板产出，画布上已没有内联标注层可造出卡片；因此这里只钉图片
+    // 本身的拖拽，卡片跟随留给面板自己的用例。
 
     // Four corner grips, and dragging one resizes (images keep their ratio).
     const grips = [...view.querySelectorAll('[data-node-id="node-image"] [data-corner]')].map(element => element.getAttribute('data-corner')).sort()

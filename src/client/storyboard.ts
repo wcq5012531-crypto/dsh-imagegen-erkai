@@ -27,6 +27,7 @@ export function defaultStoryboard(): CanvasStoryboard {
     aspectRatio: '16:9',
     resolution: '720P',
     continuity: 'cut',
+    autoStitch: false,
   }
 }
 
@@ -43,10 +44,16 @@ export function storyboardOf(node: CanvasNode): CanvasStoryboard {
   const fallback = defaultStoryboard()
   if (stored === undefined) return fallback
   return {
-    shots: stored.shots.length === 0 ? fallback.shots : stored.shots,
+    shots: stored.shots.length === 0 ? fallback.shots : stored.shots.map(shot => ({
+      ...shot,
+      ...shot.firstFrameNodeId === undefined || shot.firstFrameNodeId === ''
+        ? {}
+        : { firstFrameNodeId: shot.firstFrameNodeId },
+    })),
     aspectRatio: stored.aspectRatio === undefined || stored.aspectRatio === '' ? fallback.aspectRatio : stored.aspectRatio,
     resolution: stored.resolution === undefined || stored.resolution === '' ? fallback.resolution : stored.resolution,
     continuity: stored.continuity === 'carry' ? 'carry' : 'cut',
+    autoStitch: stored.autoStitch === true,
     ...stored.model === undefined || stored.model === '' ? {} : { model: stored.model },
     ...stored.channelId === undefined || stored.channelId === '' ? {} : { channelId: stored.channelId },
   }
@@ -206,4 +213,29 @@ export function withMovedShot(board: CanvasStoryboard, index: number, delta: num
   if (moved === undefined) return board
   shots.splice(target, 0, moved)
   return { ...board, shots }
+}
+
+/**
+ * Indexes still worth submitting in an auto-run (empty or failed, with a
+ * prompt). Carry gating is left to {@link nextShotIndex}: the auto loop asks
+ * for "next" repeatedly rather than pre-expanding the whole list.
+ */
+export function pendingShotIndexes(board: CanvasStoryboard, nodes: readonly CanvasNode[]): number[] {
+  const indexes: number[] = []
+  for (let index = 0; index < board.shots.length; index += 1) {
+    const shot = board.shots[index]!
+    if (shot.prompt.trim() === '') continue
+    const state = shotState(shot, nodes)
+    if (state === 'empty' || state === 'failed') indexes.push(index)
+  }
+  return indexes
+}
+
+/**
+ * Whether an auto-run may advance past this shot: ready, or (for cut boards)
+ * already generating is fine to leave alone while we submit siblings.
+ */
+export function shotSettledForAuto(shot: CanvasShot, nodes: readonly CanvasNode[]): boolean {
+  const state = shotState(shot, nodes)
+  return state === 'ready' || state === 'failed'
 }

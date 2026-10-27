@@ -12,7 +12,7 @@ import {
   GitBranch, Keyboard, Layers, Map as MapIcon, Maximize, Maximize2, MousePointer2, Palette, Pencil, Plus, Redo2, Scissors, SendHorizonal, Sparkles, Star,
   SquareDashedMousePointer, Trash2, Type, Undo2, Upload, Wand2, X,
 } from 'lucide-react'
-import type { CanvasAnnotation, CanvasAssetRef, CanvasConnection, CanvasDocument, CanvasFileKind, CanvasLayerInfo, CanvasLayerPlanItem, CanvasNode, CanvasRect, CanvasStoryboard, CanvasVideoRef, CanvasSkillConfigApplyResult, CanvasSkillConfigField, CanvasSkillConfigSaveResult, CanvasSkillConfigStep, CanvasSkillConfigView, CanvasSkillDescriptor, CanvasSkillLibrary, CanvasSkillOutput, CanvasSkillRunRequest, CanvasSkillTask, CanvasSketchStroke, GenerateRequest, GenerationTask, HistoryEntry, VideoGenerateRequest, VideoTaskSummary, VideoMode, VideoResolution } from '../protocol.ts'
+import type { CanvasAnnotation, CanvasAssetRef, CanvasConnection, CanvasDocument, CanvasFileKind, CanvasImagePlan, CanvasLayerInfo, CanvasLayerPlanItem, CanvasNode, CanvasRect, CanvasStoryboard, CanvasVideoRef, CanvasSkillConfigApplyResult, CanvasSkillConfigField, CanvasSkillConfigSaveResult, CanvasSkillConfigStep, CanvasSkillConfigView, CanvasSkillDescriptor, CanvasSkillLibrary, CanvasSkillOutput, CanvasSkillRunRequest, CanvasSkillTask, GenerateRequest, GenerationTask, HistoryEntry, VideoGenerateRequest, VideoTaskSummary, VideoMode, VideoResolution } from '../protocol.ts'
 import { VIDEO_DURATIONS } from '../protocol.ts'
 // The stitch order is a SHARED rule: the host builds its ffmpeg concat list with
 // the same function, so the numbers on the badges are the order of the file.
@@ -27,6 +27,8 @@ import { errorMessage, tt } from './helpers.ts'
 import type { ImageGenKey } from './locales.ts'
 import { autoRemoveBackground, canvasToDataUrl, compositeAnnotatedResult, containRect, cropRaster, drawAnnotation, loadRaster, rectBetween, transparencyRatio } from './image-ops.ts'
 import { PosterEditor } from './PosterEditor.tsx'
+import { ImageEditSurface, type ImageEditApplyPayload, type ImageEditMode } from './ImageEditSurface.tsx'
+import { drawImagePlan, imagePlanOf, imagePlanPromptLines } from './image-edit-plan.ts'
 // 工作流执行器：分层调度在 workflow-graph.ts（纯函数），执行循环在 workflow-runner.ts。
 import { runWorkflow } from './workflow-runner.ts'
 import type { WorkflowProgress } from './workflow-runner.ts'
@@ -85,11 +87,6 @@ const STORYBOARD_NODE_SIZE = { width: 380, height: 420 }
 /** Sketch boards keep a fixed frame (header + square-ish board + two tool rows)
  *  so the normalized strokes always map onto the same rect. */
 const SKETCH_NODE_SIZE = { width: 300, height: 396 }
-const SKETCH_EXPORT_WIDTH = 1024
-const SKETCH_COLORS = ['#1f2328', '#e03131', '#1971c2', '#2f9e44', '#f59f00', '#9c36b5', '#0ca678', '#f06595']
-const SKETCH_WIDTHS = [3, 6, 12]
-const SKETCH_WIDTH_DOTS = [5, 8, 12]
-const SKETCH_ERASER_RADIUS = 16
 const HISTORY_LIMIT = 60
 const WORLD_PAD = 12000
 /**
@@ -671,48 +668,6 @@ function textStyleOf(node: CanvasNode): { fontSize: number; color?: string; font
     ...metadata.color === undefined || metadata.color === '' ? {} : { color: metadata.color },
     ...metadata.bold === true ? { fontWeight: 700 } : {},
   }
-}
-
-/** Draw one normalized stroke onto a 2d context already sized to the board. */
-function drawSketchStroke(ctx: CanvasRenderingContext2D, stroke: CanvasSketchStroke, boardWidth: number, boardHeight: number): void {
-  ctx.strokeStyle = stroke.color
-  ctx.fillStyle = stroke.color
-  ctx.lineWidth = stroke.width
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
-  const points = stroke.points
-  if (points.length === 0) return
-  if (points.length === 1) {
-    const only = points[0]!
-    ctx.beginPath()
-    ctx.arc(only.x * boardWidth, only.y * boardHeight, stroke.width / 2, 0, Math.PI * 2)
-    ctx.fill()
-    return
-  }
-  ctx.beginPath()
-  points.forEach((point, index) => {
-    const x = point.x * boardWidth
-    const y = point.y * boardHeight
-    if (index === 0) ctx.moveTo(x, y)
-    else ctx.lineTo(x, y)
-  })
-  ctx.stroke()
-}
-
-/** Flatten strokes onto an opaque white PNG sized for gpt-image edits (the
- *  models treat the sketch as a plain reference image). */
-function rasterizeSketch(strokes: CanvasSketchStroke[], boardWidth: number, boardHeight: number): { dataUrl: string; width: number; height: number } {
-  const scale = SKETCH_EXPORT_WIDTH / Math.max(1, boardWidth)
-  const canvas = globalThis.document.createElement('canvas')
-  canvas.width = Math.max(1, Math.round(boardWidth * scale))
-  canvas.height = Math.max(1, Math.round(boardHeight * scale))
-  const ctx = canvas.getContext('2d')
-  if (ctx === null) throw new Error('canvas 2d context unavailable')
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-  ctx.scale(scale, scale)
-  for (const stroke of strokes) drawSketchStroke(ctx, stroke, boardWidth, boardHeight)
-  return { dataUrl: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height }
 }
 
 type ToolbarIconName = 'new' | 'select' | 'pan' | 'image' | 'text' | 'file' | 'sketch' | 'eraser' | 'trash' | 'undo' | 'redo' | 'fit' | 'minimap' | 'template' | 'download' | 'duplicate' | 'sparkle' | 'send' | 'close' | 'deleteProject' | 'annotate' | 'removeBg' | 'layers' | 'bold' | 'color' | 'skill' | 'upload' | 'expand' | 'favorite' | 'favoriteFilled' | 'help' | 'workflow' | 'timeline'
@@ -1716,6 +1671,8 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
    * a node that belongs to another document.
    */
   const [posterTarget, setPosterTarget] = useState<{ canvasId: string; nodeId: string } | null>(null)
+  /** Unified image editor (sketch + annotate). Null when closed. */
+  const [imageEditTarget, setImageEditTarget] = useState<{ nodeId: string; mode: ImageEditMode } | null>(null)
   // Read by the key and paste handlers, which are registered once and would
   // otherwise capture the first render's `null` and keep acting on the canvas
   // underneath the open editor.
@@ -2046,7 +2003,7 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
   }, [canvasCenter])
 
   /** Sketch boards are image nodes carrying live stroke data; the rasterized
-   *  PNG lands in `metadata.asset` (see SketchBoard) so they join generation
+   *  PNG lands in `metadata.asset` (via ImageEditSurface) so they join generation
    *  as ordinary reference images. */
   const createSketchNode = useCallback((position?: Point): CanvasNode => {
     const center = position ?? canvasCenter()
@@ -2057,6 +2014,14 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
       metadata: { sketch: { strokes: [] }, status: 'idle' },
     }
   }, [canvasCenter])
+
+  /** Place a sketch node and open the unified editor on the sketch tab. */
+  const placeSketchNode = useCallback((position?: Point): CanvasNode => {
+    const node = createSketchNode(position)
+    placeNewNode(node)
+    setImageEditTarget({ nodeId: node.id, mode: 'sketch' })
+    return node
+  }, [createSketchNode, placeNewNode])
 
   /** A shot list that produces one clip per shot, in list order.
    *
@@ -2105,16 +2070,6 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
       ? { ...node, ...('title' in patch ? { title: patch.title ?? node.title } : {}), ...('x' in patch || 'y' in patch || 'width' in patch || 'height' in patch ? { x: patch.x ?? node.x, y: patch.y ?? node.y, width: patch.width ?? node.width, height: patch.height ?? node.height } : {}), metadata: { ...nodeMetadata(node), ...patch } }
       : node))
   }, [updateNodes])
-
-  /** Sketch board write-backs. Stroke edits bypass history (the board has its
-   *  own stroke-level undo); asset sync happens inside SketchBoard. */
-  const patchSketchStrokes = useCallback((nodeId: string, strokes: CanvasSketchStroke[]): void => {
-    patchNode(nodeId, { sketch: { strokes } })
-  }, [patchNode])
-
-  const patchSketchAsset = useCallback((nodeId: string, asset: CanvasAssetRef | undefined): void => {
-    patchNode(nodeId, { asset, status: asset === undefined ? 'idle' : 'success' })
-  }, [patchNode])
 
   const deleteSelection = useCallback((): void => {
     const ids = selectedIdsRef.current
@@ -2230,11 +2185,11 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
    *  centered against it, and wire source -> new node in one history step. The
    *  target spot walks right past any node already occupying it, and the
    *  viewport pans just enough to keep the new node visible. */
-  const addConnectedNode = useCallback((sourceId: string, factory: (position: Point) => CanvasNode): void => {
+  const addConnectedNode = useCallback((sourceId: string, factory: (position: Point) => CanvasNode): CanvasNode | null => {
     const current = documentRef.current
-    if (current === null) return
+    if (current === null) return null
     const source = current.nodes.find(item => item.id === sourceId)
-    if (source === undefined) return
+    if (source === undefined) return null
     const draft = factory({ x: 0, y: 0 })
     const y = Math.round(source.y + (source.height - draft.height) / 2)
     let x = source.x + source.width + 90
@@ -2253,7 +2208,7 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
       connections: [...previous.connections, { id: newId('edge'), fromNodeId: sourceId, toNodeId: node.id }],
     }))
     const bounds = viewportRef.current?.getBoundingClientRect()
-    if (bounds === undefined) return
+    if (bounds === undefined) return node
     const viewport = current.viewport
     const k = viewport.k
     const left = viewport.x + x * k
@@ -2265,6 +2220,7 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
     if (right > bounds.width - 24) dx = right - (bounds.width - 24)
     if (bottom > bounds.height - 24) dy = bottom - (bounds.height - 24)
     if (dx !== 0 || dy !== 0) setViewport({ x: viewport.x - dx, y: viewport.y - dy, k })
+    return node
   }, [mutate, setViewport])
 
   /** Anchor the add-node menu at the source handle's on-screen position. The
@@ -3160,6 +3116,36 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
     setSelectedConnectionId(null)
   }, [])
 
+  /** Open the unified image editor (画板 + 标注). Replaces the old in-node-only paths. */
+  const openImageEdit = useCallback((node: CanvasNode, mode?: ImageEditMode): void => {
+    if (node.type !== 'image') return
+    setAnnotateNodeId(null)
+    setAnnotationDraft(null)
+    setColorPickerNodeId(null)
+    setSelectedConnectionId(null)
+    const preferred = mode ?? (isSketchNode(node) ? 'sketch' : 'annotate')
+    setImageEditTarget({ nodeId: node.id, mode: preferred })
+  }, [])
+
+  /** Persist editor output onto the same image node; new boxes become prompt cards. */
+  const applyImageEdit = useCallback((nodeId: string, payload: ImageEditApplyPayload): void => {
+    const current = documentRef.current
+    if (current === null) return
+    const source = current.nodes.find(node => node.id === nodeId)
+    if (source === undefined || source.type !== 'image') return
+    const keepSketch = payload.strokes.length > 0 || source.metadata?.sketch !== undefined
+    patchNode(nodeId, {
+      ...(keepSketch ? { sketch: { strokes: payload.strokes } } : {}),
+      imagePlan: payload.plan.marks.length === 0 ? undefined : payload.plan,
+      ...(payload.asset !== undefined
+        ? { asset: payload.asset, status: 'success' as const }
+        : payload.strokes.length === 0 && isSketchNode(source)
+          ? { asset: undefined, status: 'idle' as const }
+          : {}),
+    })
+    for (const box of payload.newBoxes) addAnnotationPrompt(source, box)
+  }, [addAnnotationPrompt, patchNode])
+
   /** Pointer handlers of the annotation overlay (client coords -> image space). */
   const beginAnnotationDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>, node: CanvasNode): void => {
     if (event.button !== 0) return
@@ -3480,9 +3466,16 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
       const castPrompt = castPromptOf(current, castNodes.map(node => node.id))
       const referencePool = [...referenceImages, ...castNodes]
       const baseAsset = referencePool[0] !== undefined ? usableAsset(referencePool[0]!) : undefined
-      const finalPrompt = [annotationPlan === undefined ? prompt : `${prompt}\n\n${annotationPlan.prompt}`, castPrompt]
-        .filter(part => part !== '')
-        .join('\n\n')
+      // Vector plan marks (针/箭/圈…) from the unified editor — prompt-only; red-box
+      // annotation cards still go through annotationPlan (composited reference).
+      const planPrompt = referenceImages
+        .flatMap(node => imagePlanPromptLines(imagePlanOf(node)))
+        .join('\n')
+      const finalPrompt = [
+        annotationPlan === undefined ? prompt : `${prompt}\n\n${annotationPlan.prompt}`,
+        planPrompt,
+        castPrompt,
+      ].filter(part => part !== '').join('\n\n')
       let image: string | undefined
       let images: string[] | undefined
       let refName: string | undefined
@@ -4836,6 +4829,7 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
         // before anything behind it (the selection it would otherwise clear is
         // what the user expects to survive).
         if (shortcutHelpOpen) { setShortcutHelpOpen(false); return }
+        if (imageEditTarget !== null) { setImageEditTarget(null); return }
         // Esc leaves the 标注 tool first, then clears the selection.
         if (annotateNodeId !== null) { setAnnotateNodeId(null); setAnnotationDraft(null); return }
         // The in-canvas overlays come next, topmost first. They are rendered by
@@ -4932,7 +4926,7 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
       window.removeEventListener('blur', onBlur)
       window.removeEventListener('paste', onPaste)
     }
-  }, [addAssets, annotateNodeId, api, canvasCenter, copySelection, deleteNode, deleteSelection, duplicateSelection, pasteClipboard, pickerOpen, polishNode, redo, shortcutHelpOpen, skillLibraryOpen, skillMenu, undo, videoPreviewNodeId, pendingSkill, timelineOpen, castTarget])
+  }, [addAssets, annotateNodeId, api, canvasCenter, copySelection, deleteNode, deleteSelection, duplicateSelection, imageEditTarget, pasteClipboard, pickerOpen, polishNode, redo, shortcutHelpOpen, skillLibraryOpen, skillMenu, undo, videoPreviewNodeId, pendingSkill, timelineOpen, castTarget])
 
   // ------------------------------------------------------ viewport events
 
@@ -5606,9 +5600,14 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
           setVideoPreviewNodeId(node.id)
           return
         }
-        if (!hasImage || node.type !== 'image') return
+        if (node.type !== 'image') return
         event.preventDefault()
         event.stopPropagation()
+        if (isSketch) {
+          openImageEdit(node, 'sketch')
+          return
+        }
+        if (!hasImage) return
         openImageNode(node)
       }}
       onContextMenu={event => {
@@ -5718,14 +5717,17 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
             onChange={event => patchNode(node.id, { text: event.target.value })}
           />
         : isSketch
-        ? <SketchBoard
-            api={api}
-            node={node}
-            zoom={document?.viewport.k ?? 1}
-            strokes={metadata.sketch?.strokes ?? []}
-            onStrokesChange={strokes => patchSketchStrokes(node.id, strokes)}
-            onAssetChange={asset => patchSketchAsset(node.id, asset)}
-          />
+        ? <div className={css.nodeBody} data-sketch-preview="">
+            {hasImage
+              ? <img src={asset.url} alt={node.title} title={tt('canvas.editImage')} draggable={false} onDragStart={event => event.preventDefault()} />
+              : <button
+                  type="button"
+                  className={css.nodeEmpty}
+                  style={{ pointerEvents: 'auto' }}
+                  onClick={() => openImageEdit(node, 'sketch')}
+                ><ToolbarIcon name="sketch" /><span>{tt('canvas.edit.sketchEmpty')}</span></button>}
+            {hasImage ? <ImagePlanThumbOverlay plan={imagePlanOf(node)} /> : null}
+          </div>
         : isStoryboard
         ? <StoryboardBody
             node={node}
@@ -5792,6 +5794,7 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
                 : hasImage
                   ? <img src={asset.url} alt={node.title} title={tt('canvas.preview.doubleClick')} draggable={false} onDragStart={event => event.preventDefault()} />
                   : <button type="button" className={css.nodeEmpty} onClick={() => imageFileRef.current?.click()}><ToolbarIcon name="image" /><span>{tt('canvas.emptyImageNode')}</span></button>}
+            {hasImage ? <ImagePlanThumbOverlay plan={imagePlanOf(node)} /> : null}
             {hasImage && annotations.length > 0 ? <div className={css.annotationLayer} aria-hidden="true">
               {annotations.map((annotation, index) => <div key={annotation.id} className={css.annotationBox} style={boxStyle(annotation)}>
                 <span className={css.annotationBadge}>{index + 1}</span>
@@ -5893,8 +5896,11 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
           <IconButton name="favorite" label={tt('canvas.videoFavorite')} disabled={busyLabel !== undefined || video.entryId === undefined} onClick={() => { favoriteVideoNode(node) }} />
           <IconButton name="expand" label={tt('canvas.videoPreview')} onClick={() => { setVideoPreviewNodeId(node.id) }} />
         </> : null}
-        {node.type === 'image' && hasImage ? <>
-          <IconButton name="annotate" label={tt('canvas.annotate')} active={annotating} onClick={() => toggleAnnotate(node)} />
+        {isSketch ? <>
+          <IconButton name="sketch" label={tt('canvas.editImage')} onClick={() => openImageEdit(node, 'sketch')} />
+        </> : null}
+        {node.type === 'image' && hasImage && !isSketch ? <>
+          <IconButton name="annotate" label={tt('canvas.editImage')} onClick={() => openImageEdit(node, 'annotate')} />
           <IconButton name="removeBg" label={tt('canvas.removeBackground')} disabled={busyLabel !== undefined} onClick={() => { void removeNodeBackground(node) }} />
           <IconButton name="text" label={tt('poster.title')} disabled={busyLabel !== undefined} onClick={() => { if (document !== null) setPosterTarget({ canvasId: document.id, nodeId: node.id }) }} />
           <IconButton name="layers" label={tt('canvas.splitLayers')} disabled={busyLabel !== undefined} onClick={() => { void splitLayers(node) }} />
@@ -6278,6 +6284,7 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
       if (contextMenu.type === 'node') {
         const node = nodeById.get(contextMenu.nodeId)
         if (node !== undefined && node.type === 'image' && (assetOf(node)?.url.length ?? 0) > 0) {
+          items.push({ label: tt('canvas.editImage'), icon: 'annotate', action: () => openImageEdit(node, isSketchNode(node) ? 'sketch' : 'annotate') })
           items.push({ label: tt('canvas.preview.expand'), icon: 'expand', action: () => openImageNode(node) })
           items.push({ label: tt('poster.title'), icon: 'text', action: () => { if (document !== null) setPosterTarget({ canvasId: document.id, nodeId: node.id }) } })
           items.push({ label: tt('canvas.download'), icon: 'download', action: () => downloadNode(node) })
@@ -6348,7 +6355,7 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
         items.push({ label: tt('canvas.imageMenuUpload'), icon: 'upload', action: () => imageFileRef.current?.click() })
         items.push({ label: tt('canvas.addVideo'), icon: 'timeline', action: () => setVideoPickerOpen(true) })
         items.push({ label: tt('canvas.addTextNode'), icon: 'text', action: () => placeNewNode(createTextNode(contextMenu.world)) })
-        items.push({ label: tt('canvas.addSketchNode'), icon: 'sketch', action: () => placeNewNode(createSketchNode(contextMenu.world)) })
+        items.push({ label: tt('canvas.addSketchNode'), icon: 'sketch', action: () => { placeSketchNode(contextMenu.world) } })
         items.push({ label: tt('canvas.storyboardNode'), icon: 'layers', action: () => placeNewNode(createStoryboardNode(contextMenu.world)) })
         items.push({ label: tt('canvas.addConfigNode'), icon: 'sparkle', action: () => placeNewNode(createConfigNode(contextMenu.world)) })
         items.push({ label: tt('canvas.skills.addFileNode'), icon: 'file', action: () => { placeNewNode(createEmptyFileNode(contextMenu.world)); setFileTargetNodeId(null) } })
@@ -6372,7 +6379,7 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
     if (createMenu !== null) {
       return <div className={css.contextMenu} style={{ left: createMenu.screen.x, top: createMenu.screen.y }} data-canvas-no-zoom="" role="menu">
         <button type="button" role="menuitem" onClick={() => { placeNewNode(createTextNode(createMenu.world)); setCreateMenu(null) }}><ToolbarIcon name="text" size={16} />{tt('canvas.addTextNode')}</button>
-        <button type="button" role="menuitem" onClick={() => { placeNewNode(createSketchNode(createMenu.world)); setCreateMenu(null) }}><ToolbarIcon name="sketch" size={16} />{tt('canvas.addSketchNode')}</button>
+        <button type="button" role="menuitem" onClick={() => { placeSketchNode(createMenu.world); setCreateMenu(null) }}><ToolbarIcon name="sketch" size={16} />{tt('canvas.addSketchNode')}</button>
         <button type="button" role="menuitem" data-add-storyboard="" onClick={() => { placeNewNode(createStoryboardNode(createMenu.world)); setCreateMenu(null) }}><ToolbarIcon name="layers" size={16} />{tt('canvas.storyboardNode')}</button>
         <button type="button" role="menuitem" onClick={() => { placeNewNode(createImageNode({ assetId: '', url: '', mime: 'image/png', bytes: 0, width: 1, height: 1, origin: 'upload' }, createMenu.world)); setCreateMenu(null) }}><ToolbarIcon name="image" size={16} />{tt('canvas.addImageNode')}</button>
         <button type="button" role="menuitem" onClick={() => { placeNewNode(createEmptyFileNode(createMenu.world)); setFileTargetNodeId(null); setCreateMenu(null) }}><ToolbarIcon name="file" size={16} />{tt('canvas.skills.addFileNode')}</button>
@@ -6589,7 +6596,11 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
       onMouseLeave={scheduleNodeAddMenuClose}
     >
       <button type="button" role="menuitem" onClick={() => { addConnectedNode(nodeAddMenu.nodeId, position => createTextNode(position)); setNodeAddMenu(null) }}><ToolbarIcon name="text" size={16} />{tt('canvas.addTextNode')}</button>
-      <button type="button" role="menuitem" onClick={() => { addConnectedNode(nodeAddMenu.nodeId, position => createSketchNode(position)); setNodeAddMenu(null) }}><ToolbarIcon name="sketch" size={16} />{tt('canvas.addSketchNode')}</button>
+      <button type="button" role="menuitem" onClick={() => {
+        const created = addConnectedNode(nodeAddMenu.nodeId, position => createSketchNode(position))
+        setNodeAddMenu(null)
+        if (created !== null) setImageEditTarget({ nodeId: created.id, mode: 'sketch' })
+      }}><ToolbarIcon name="sketch" size={16} />{tt('canvas.addSketchNode')}</button>
       <button type="button" role="menuitem" onClick={() => { addConnectedNode(nodeAddMenu.nodeId, position => createStoryboardNode(position)); setNodeAddMenu(null) }}><ToolbarIcon name="layers" size={16} />{tt('canvas.storyboardNode')}</button>
       <button type="button" role="menuitem" onClick={() => { addConnectedNode(nodeAddMenu.nodeId, position => createImageNode({ assetId: '', url: '', mime: 'image/png', bytes: 0, width: 1, height: 1, origin: 'upload' }, position)); setNodeAddMenu(null) }}><ToolbarIcon name="image" size={16} />{tt('canvas.addImageNode')}</button>
       {nodeAddMenu.nodeType !== 'config' ? <button type="button" role="menuitem" onClick={() => { addConnectedNode(nodeAddMenu.nodeId, position => createConfigNode(position)); setNodeAddMenu(null) }}><ToolbarIcon name="sparkle" size={16} />{tt('canvas.addConfigNode')}</button> : null}
@@ -6721,6 +6732,18 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
       />
     })() : null}
 
+    {imageEditTarget !== null ? (() => {
+      const source = document?.nodes.find(node => node.id === imageEditTarget.nodeId)
+      if (source === undefined || source.type !== 'image') return null
+      return <ImageEditSurface
+        api={api}
+        node={source}
+        initialMode={imageEditTarget.mode}
+        onClose={() => setImageEditTarget(null)}
+        onApply={payload => { applyImageEdit(source.id, payload) }}
+      />
+    })() : null}
+
     {pickerOpen ? <ImagePicker
       api={api}
       history={history}
@@ -6759,240 +6782,27 @@ export function CanvasWorkspace(props: CanvasWorkspaceProps): React.JSX.Element 
   </section>
 }
 
-/** Free-hand drawing surface for sketch nodes. Strokes live in node metadata
- *  (normalized 0..1 board space, so the frame is fixed-size and never rescaled);
- *  after a short idle the board rasterizes to a white-background PNG and stores
- *  it as the node asset, which makes the sketch usable as a generation
- *  reference exactly like any uploaded image node. */
-function SketchBoard(props: {
-  api: ImageGenApi
-  node: CanvasNode
-  /** Current viewport zoom; only used to keep the backing store crisp. */
-  zoom: number
-  strokes: CanvasSketchStroke[]
-  onStrokesChange: (strokes: CanvasSketchStroke[]) => void
-  onAssetChange: (asset: CanvasAssetRef | undefined) => void
-}): React.JSX.Element {
-  const { node, strokes } = props
-  const [color, setColor] = useState(SKETCH_COLORS[0]!)
-  const [widthIndex, setWidthIndex] = useState(1)
-  const [erasing, setErasing] = useState(false)
-  const [drawing, setDrawing] = useState(false)
+/** Draw imagePlan marks over a node thumb (same normalized space as the editor). */
+function ImagePlanThumbOverlay(props: { plan: CanvasImagePlan }): React.JSX.Element | null {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const strokesRef = useRef(strokes)
-  strokesRef.current = strokes
-  const zoomRef = useRef(props.zoom)
-  zoomRef.current = props.zoom
-  const liveStrokeRef = useRef<CanvasSketchStroke | null>(null)
-  const eraserDragRef = useRef(false)
-  const apiRef = useRef(props.api)
-  apiRef.current = props.api
-  const callbacksRef = useRef({ onStrokesChange: props.onStrokesChange, onAssetChange: props.onAssetChange })
-  callbacksRef.current = { onStrokesChange: props.onStrokesChange, onAssetChange: props.onAssetChange }
-
-  const redraw = useCallback((): void => {
+  const marksKey = props.plan.marks.map(mark => mark.id).join(',')
+  useEffect(() => {
     const canvas = canvasRef.current
     if (canvas === null) return
     const width = canvas.clientWidth
     const height = canvas.clientHeight
     if (width < 2 || height < 2) return
-    const dpr = (typeof window.devicePixelRatio === 'number' && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1)
-      * Math.min(3, Math.max(1, zoomRef.current))
-    const backingWidth = Math.round(width * dpr)
-    const backingHeight = Math.round(height * dpr)
-    if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
-      canvas.width = backingWidth
-      canvas.height = backingHeight
-    }
+    const dpr = typeof window.devicePixelRatio === 'number' && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1
+    canvas.width = Math.round(width * dpr)
+    canvas.height = Math.round(height * dpr)
     const ctx = canvas.getContext('2d')
     if (ctx === null) return
-    ctx.setTransform(backingWidth / width, 0, 0, backingHeight / height, 0, 0)
-    ctx.fillStyle = '#ffffff'
-    ctx.fillRect(0, 0, width, height)
-    for (const stroke of strokesRef.current) drawSketchStroke(ctx, stroke, width, height)
-    const live = liveStrokeRef.current
-    if (live !== null) drawSketchStroke(ctx, live, width, height)
-  }, [])
-
-  // Debounced raster sync: every committed stroke state lands as the node's
-  // PNG asset (or clears it when the board is emptied). Token-guarded against
-  // burst edits; a synced-strokes key dedupes re-runs that only happen because
-  // a canvas save round-trip handed React a fresh (but identical) strokes
-  // array — without it every save would trigger a redundant re-upload.
-  const syncTokenRef = useRef(0)
-  const syncedStrokesRef = useRef<string | null>(null)
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (canvas === null) return
-    const token = ++syncTokenRef.current
-    const strokesKey = JSON.stringify(strokes)
-    if (syncedStrokesRef.current === strokesKey) return
-    const timer = window.setTimeout(() => {
-      if (syncTokenRef.current !== token) return
-      if (strokes.length === 0) {
-        syncedStrokesRef.current = strokesKey
-        callbacksRef.current.onAssetChange(undefined)
-        return
-      }
-      const width = canvas.clientWidth
-      const height = canvas.clientHeight
-      if (width < 2 || height < 2) return
-      let raster: { dataUrl: string; width: number; height: number }
-      try {
-        raster = rasterizeSketch(strokes, width, height)
-      } catch { return }
-      void apiRef.current.canvasUpload(raster.dataUrl, raster.width, raster.height, { origin: 'upload', originId: `sketch-${node.id}` })
-        .then(asset => {
-          if (syncTokenRef.current !== token) return
-          syncedStrokesRef.current = strokesKey
-          callbacksRef.current.onAssetChange(asset)
-        })
-        .catch(() => { /* board stays usable without the synced reference */ })
-    }, strokes.length === 0 ? 150 : 600)
-    return () => window.clearTimeout(timer)
-  }, [node.id, strokes])
-
-  useEffect(() => { redraw() }, [redraw, strokes, drawing, Math.round(props.zoom * 50)])
-
-  const boardPoint = (event: ReactPointerEvent<HTMLCanvasElement>): Point | null => {
-    const canvas = canvasRef.current
-    if (canvas === null) return null
-    const rect = canvas.getBoundingClientRect()
-    if (rect.width < 1 || rect.height < 1) return null
-    return {
-      x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
-      y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
-    }
-  }
-
-  const eraseAt = (point: Point): void => {
-    const canvas = canvasRef.current
-    if (canvas === null) return
-    const rect = canvas.getBoundingClientRect()
-    const radiusX = SKETCH_ERASER_RADIUS / rect.width
-    const radiusY = SKETCH_ERASER_RADIUS / rect.height
-    const kept = strokesRef.current.filter(stroke => !stroke.points.some(candidate =>
-      Math.abs(candidate.x - point.x) < radiusX && Math.abs(candidate.y - point.y) < radiusY))
-    if (kept.length !== strokesRef.current.length) callbacksRef.current.onStrokesChange(kept)
-  }
-
-  const onBoardPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
-    if (event.button !== 0) return
-    // Keep the stroke off the node-drag / marquee gesture stack.
-    event.stopPropagation()
-    event.preventDefault()
-    const point = boardPoint(event)
-    if (point === null) return
-    event.currentTarget.setPointerCapture(event.pointerId)
-    if (erasing) {
-      eraserDragRef.current = true
-      eraseAt(point)
-      return
-    }
-    liveStrokeRef.current = { color, width: SKETCH_WIDTHS[widthIndex]!, points: [point] }
-    setDrawing(true)
-    redraw()
-  }
-
-  const onBoardPointerMove = (event: ReactPointerEvent<HTMLCanvasElement>): void => {
-    if (eraserDragRef.current) {
-      const point = boardPoint(event)
-      if (point !== null) eraseAt(point)
-      return
-    }
-    const live = liveStrokeRef.current
-    if (live === null) return
-    const point = boardPoint(event)
-    if (point === null) return
-    const canvas = canvasRef.current
-    const rect = canvas?.getBoundingClientRect()
-    const last = live.points[live.points.length - 1]!
-    if (rect !== undefined && Math.hypot((point.x - last.x) * rect.width, (point.y - last.y) * rect.height) < 1.5) return
-    live.points.push({ x: Math.round(point.x * 10000) / 10000, y: Math.round(point.y * 10000) / 10000 })
-    redraw()
-  }
-
-  const onBoardPointerUp = (): void => {
-    if (eraserDragRef.current) {
-      eraserDragRef.current = false
-      return
-    }
-    const live = liveStrokeRef.current
-    if (live === null) return
-    liveStrokeRef.current = null
-    setDrawing(false)
-    callbacksRef.current.onStrokesChange([...strokesRef.current, live])
-  }
-
-  return <div className={css.sketch} data-canvas-no-zoom="">
-    <div className={css.sketchBoardWrap}>
-      <canvas
-        ref={canvasRef}
-        className={css.sketchBoard}
-        data-erasing={erasing ? '' : undefined}
-        onPointerDown={onBoardPointerDown}
-        onPointerMove={onBoardPointerMove}
-        onPointerUp={onBoardPointerUp}
-        onPointerCancel={onBoardPointerUp}
-      />
-      {strokes.length === 0 && !drawing ? <span className={css.sketchPlaceholder}>{tt('canvas.sketchPlaceholder')}</span> : null}
-    </div>
-    <div className={css.sketchToolbar} onPointerDown={event => event.stopPropagation()}>
-      <div className={css.sketchColors} role="radiogroup" aria-label={tt('canvas.sketchBrush')}>
-        {SKETCH_COLORS.map(item => <button
-          key={item}
-          type="button"
-          role="radio"
-          aria-checked={item === color && !erasing}
-          data-active={item === color && !erasing ? '' : undefined}
-          className={css.sketchSwatch}
-          style={{ background: item }}
-          // A swatch's only visible cue is its fill, which never reaches the
-          // accessibility tree: without a name all eight read as the same
-          // "brush colour" radio and the colour cannot be chosen by keyboard.
-          aria-label={`${tt('canvas.sketchColor')} ${item}`}
-          title={tt('canvas.sketchBrush')}
-          onClick={() => { setColor(item); setErasing(false) }}
-        />)}
-      </div>
-      <div className={css.sketchTools}>
-        {SKETCH_WIDTHS.map((item, index) => <button
-          key={item}
-          type="button"
-          className={css.sketchWidth}
-          data-active={!erasing && index === widthIndex ? '' : undefined}
-          title={tt('canvas.sketchWidth')}
-          aria-label={`${tt('canvas.sketchWidth')} ${index + 1}`}
-          onClick={() => { setWidthIndex(index); setErasing(false) }}
-        ><span style={{ width: SKETCH_WIDTH_DOTS[index], height: SKETCH_WIDTH_DOTS[index] }} /></button>)}
-        <span className={css.sketchToolDivider} aria-hidden="true" />
-        <button
-          type="button"
-          className={css.sketchToolBtn}
-          data-active={erasing ? '' : undefined}
-          title={tt('canvas.sketchEraser')}
-          aria-label={tt('canvas.sketchEraser')}
-          onClick={() => setErasing(previous => !previous)}
-        ><ToolbarIcon name="eraser" size={14} /></button>
-        <button
-          type="button"
-          className={css.sketchToolBtn}
-          title={tt('canvas.sketchUndo')}
-          aria-label={tt('canvas.sketchUndo')}
-          disabled={strokes.length === 0}
-          onClick={() => callbacksRef.current.onStrokesChange(strokes.slice(0, -1))}
-        ><ToolbarIcon name="undo" size={14} /></button>
-        <button
-          type="button"
-          className={css.sketchToolBtn}
-          title={tt('canvas.sketchClear')}
-          aria-label={tt('canvas.sketchClear')}
-          disabled={strokes.length === 0}
-          onClick={() => callbacksRef.current.onStrokesChange([])}
-        ><ToolbarIcon name="trash" size={14} /></button>
-      </div>
-    </div>
-  </div>
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, width, height)
+    drawImagePlan(ctx, props.plan, width, height)
+  }, [marksKey, props.plan])
+  if (props.plan.marks.length === 0) return null
+  return <canvas ref={canvasRef} className={css.imagePlanOverlay} aria-hidden="true" />
 }
 
 function ImagePicker(props: {

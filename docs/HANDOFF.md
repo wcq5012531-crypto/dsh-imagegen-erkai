@@ -468,3 +468,21 @@ vendor 副本已同步 1.16.10。
 
 验证：`npx tsc --noEmit`、`npm run build`、`node scripts/smoke.mjs`（新增 action-cluster 断言）、
 `node scripts/verify-ui-contracts.mjs`。
+
+## 22. 图片编辑面板与冒烟同步（1.16.14）
+
+1. **结构。** 画布节点工具条的「图片编辑」打开 `src/client/ImageEditSurface.tsx`：
+   `[data-image-edit-surface]` 的 role=dialog，头部两个 `[role="tab"]`（涂鸦 / 标注），
+   中间一块 canvas（所有绘制都在上面），底部 关闭编辑器 / 应用到节点。
+   标注工具六种：框选标注、图钉、箭头、椭圆、自由圈、画笔；标记与提示词一起进
+   `CanvasImagePlan`，由 `onApply` 交回画布。
+2. **下线的东西。** `annotateNodeId` / `toggleAnnotate` 仍是死代码（没有入口再设置它），
+   节点不再渲染 `data-annotating`。清理它们时注意 `attachedCards()` 仍在用——标注卡片
+   的数据模型没删，只是没有内联创建入口了。
+3. **测试。** `scripts/smoke.mjs` 的 E1 段：内联标注块改为面板骨架断言；「配置节点生成」
+   改为断言「图下游运行带参考图（mode=edit、refName=canvas-reference.png、
+   sourceNodeId=node-image、parentNodeId=node-config）」。卡片跟随的两条断言随创建入口
+   一起移除，原因写进了注释。
+
+验证：`npx tsc --noEmit`、`npm run build`、`node scripts/smoke.mjs`（SMOKE TEST OK）、
+`node scripts/verify-ui-contracts.mjs`（UI CONTRACTS VERIFIED）。
